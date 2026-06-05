@@ -1,6 +1,7 @@
 /** Exporta um webm gravado como GIF, amostrando frames via <video> + canvas. */
 
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
+import { compose, type Scene } from './compose'
 
 /** Recorte da fonte, em frações 0..1 do frame original. */
 export interface Crop {
@@ -13,16 +14,23 @@ export interface Crop {
 export interface GifOptions {
   /** Quadros por segundo do GIF. Default 12. */
   fps?: number
-  /** Largura máxima em px; mantém proporção. Default = resolução original. */
-  maxWidth?: number
   /** Início do trecho em segundos. Default 0. */
   start?: number
   /** Fim do trecho em segundos. Default = duração. */
   end?: number
   /** Recorte da região. Default = frame inteiro. */
   crop?: Crop
+  /** Cena (moldura, background, fit). Default = vídeo cru. */
+  scene?: Scene
   /** Progresso 0..1. */
   onProgress?: (p: number) => void
+}
+
+const DEFAULT_SCENE: Scene = {
+  frame: null,
+  background: '#000',
+  fit: 'fit',
+  padding: 0,
 }
 
 /** MediaRecorder costuma reportar duration = Infinity até um seek forçado. */
@@ -86,20 +94,15 @@ export async function webmToGif(
 
   // região de origem (crop em px), default frame inteiro
   const crop = opts.crop
-  const sx = crop ? crop.x * vw : 0
-  const sy = crop ? crop.y * vh : 0
-  const sw = crop ? crop.w * vw : vw
-  const sh = crop ? crop.h * vh : vh
-
-  // sem maxWidth = resolução original (frame/crop em px nativos)
-  const scale = opts.maxWidth ? Math.min(1, opts.maxWidth / sw) : 1
-  const width = Math.max(1, Math.round(sw * scale))
-  const height = Math.max(1, Math.round(sh * scale))
+  const src = {
+    x: crop ? crop.x * vw : 0,
+    y: crop ? crop.y * vh : 0,
+    w: crop ? crop.w * vw : vw,
+    h: crop ? crop.h * vh : vh,
+  }
+  const scene = opts.scene ?? DEFAULT_SCENE
 
   const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
 
   // trecho a exportar (trim)
   const start = Math.max(0, opts.start ?? 0)
@@ -112,7 +115,8 @@ export async function webmToGif(
 
   for (let i = 0; i < frameCount; i++) {
     await seekTo(video, start + i / fps)
-    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height)
+    const { width, height } = compose(canvas, video, src, scene)
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!
     const { data } = ctx.getImageData(0, 0, width, height)
     const palette = quantize(data, 256)
     const index = applyPalette(data, palette)

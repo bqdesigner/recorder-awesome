@@ -2,6 +2,25 @@
   margin-top: 1.5rem;
 }
 
+.stepper {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+
+.stepper li {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.stepper li.on {
+  color: #4a9eff;
+  font-weight: 600;
+}
+
 /* vídeo é só fonte de frames; renderizado fora da tela (display:none pode
    impedir a decodificação em alguns browsers) */
 .source {
@@ -48,6 +67,40 @@
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
 }
 
+/* cantos de redimensionamento (o ponteiro é tratado pela overlay via hit-test) */
+.handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border: 1px solid #4a9eff;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.handle.nw {
+  top: -7px;
+  left: -7px;
+}
+.handle.ne {
+  top: -7px;
+  right: -7px;
+}
+.handle.sw {
+  bottom: -7px;
+  left: -7px;
+}
+.handle.se {
+  bottom: -7px;
+  right: -7px;
+}
+
+.playbar {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
 .controls {
   margin-top: 1rem;
   max-width: 480px;
@@ -60,10 +113,43 @@
   text-align: center;
 }
 
+.format {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.format label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #aaa;
+  text-align: left;
+}
+
+.format input[type='color'] {
+  width: 48px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   justify-content: center;
   margin-top: 1rem;
+}
+
+.actions .primary {
+  background: #4a9eff;
+  color: #fff;
+  border-color: #4a9eff;
 }

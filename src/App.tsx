@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { startRecording, type Recording, type RecordingSession } from './engine'
 import Editor from './components/Editor'
 import './App.css'
@@ -10,6 +10,14 @@ function App() {
   const [previewUrl, setPreviewUrl] = useState<string>('')
   const sessionRef = useRef<RecordingSession | null>(null)
   const recordingRef = useRef<Recording | null>(null)
+
+  // avisa antes de sair/atualizar se há gravação ou captura em andamento
+  useEffect(() => {
+    if (status === 'idle') return
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [status])
 
   async function handleStart() {
     try {
