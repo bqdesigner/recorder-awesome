@@ -64,7 +64,8 @@ export async function webmToMp4(
   out.height = H
   const outCtx = out.getContext('2d')!
 
-  const bitrate = 8_000_000
+  // bitrate adaptativo (~0.2 bit/pixel/frame, teto 50 Mbps) p/ texto nítido
+  const bitrate = Math.min(50_000_000, Math.round(W * H * fps * 0.2))
   const codec = await pickCodec(W, H, fps, bitrate)
 
   const muxer = new Muxer({

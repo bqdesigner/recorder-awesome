@@ -29,12 +29,24 @@ function pickMimeType(): string {
  */
 export async function startRecording(): Promise<RecordingSession> {
   const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
+    video: {
+      frameRate: { ideal: 30 },
+      width: { ideal: 3840 },
+      height: { ideal: 2160 },
+    },
     audio: false,
   })
 
   const mimeType = pickMimeType()
-  const recorder = new MediaRecorder(stream, { mimeType })
+  // bitrate alto evita texto borrado/blocado; escala com a resolução capturada.
+  // ~0.2 bit por pixel por frame, com teto de 50 Mbps.
+  const { width = 1920, height = 1080, frameRate = 30 } =
+    stream.getVideoTracks()[0]?.getSettings() ?? {}
+  const videoBitsPerSecond = Math.min(
+    50_000_000,
+    Math.round(width * height * frameRate * 0.2),
+  )
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond })
   const chunks: Blob[] = []
   const startedAt = performance.now()
 

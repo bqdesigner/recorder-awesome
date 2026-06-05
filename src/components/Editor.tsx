@@ -3,6 +3,7 @@ import {
   webmToGif,
   webmToMp4,
   compose,
+  composedSize,
   FRAMES,
   type Crop,
   type Scene,
@@ -53,6 +54,9 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [step, setStep] = useState<Step>('edit')
   const [format, setFormat] = useState<'gif' | 'mp4'>('gif')
   const [speed, setSpeed] = useState(1)
+  const [fps, setFps] = useState(15)
+  const [scale, setScale] = useState(1)
+  const [dither, setDither] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [progress, setProgress] = useState(0)
   const [playing, setPlaying] = useState(true)
@@ -264,10 +268,28 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
       const mp4 = await webmToMp4(blob, duration, opts)
       download(mp4, 'gravacao.mp4')
     } else {
-      const gif = await webmToGif(blob, duration, opts)
+      const gif = await webmToGif(blob, duration, { ...opts, fps, scale, dither })
       download(gif, 'gravacao.gif')
     }
     setExporting(false)
+  }
+
+  // dimensões e tamanho estimado da saída GIF (guia o trade-off qualidade/tamanho)
+  function gifEstimate() {
+    const v = videoRef.current
+    if (!v || !v.videoWidth) return null
+    const vw = v.videoWidth
+    const vh = v.videoHeight
+    const srcW = crop ? crop.w * vw : vw
+    const srcH = crop ? crop.h * vh : vh
+    const { width, height } = composedSize(scene, srcW, srcH)
+    const ow = Math.max(1, Math.round(width * scale))
+    const oh = Math.max(1, Math.round(height * scale))
+    const span = Math.max(0, (trimEnd - trimStart) / speed)
+    const frames = Math.max(1, Math.round(span * fps))
+    // heurística grosseira: ~0.18 byte/pixel após LZW em conteúdo de tela
+    const mb = (frames * ow * oh * 0.18) / 1e6
+    return { ow, oh, frames, mb }
   }
 
   return (
@@ -450,7 +472,57 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                 <option value={2}>2x</option>
               </select>
             </label>
+            {format === 'gif' && (
+              <>
+                <label>
+                  FPS
+                  <select
+                    value={fps}
+                    onChange={(e) => setFps(+e.target.value)}
+                    disabled={exporting}
+                  >
+                    <option value={10}>10 (menor)</option>
+                    <option value={15}>15</option>
+                    <option value={20}>20</option>
+                    <option value={24}>24 (suave)</option>
+                  </select>
+                </label>
+                <label>
+                  Resolução
+                  <select
+                    value={scale}
+                    onChange={(e) => setScale(+e.target.value)}
+                    disabled={exporting}
+                  >
+                    <option value={1}>100%</option>
+                    <option value={0.75}>75%</option>
+                    <option value={0.5}>50%</option>
+                  </select>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={dither}
+                    onChange={(e) => setDither(e.target.checked)}
+                    disabled={exporting}
+                  />
+                  Suavizar cores (dithering)
+                </label>
+              </>
+            )}
           </div>
+          {format === 'gif' &&
+            !exporting &&
+            (() => {
+              const est = gifEstimate()
+              if (!est) return null
+              return (
+                <p className="hint">
+                  {est.ow}×{est.oh}px · {est.frames} frames · ~{est.mb.toFixed(1)} MB
+                  <span className="muted"> (estimativa)</span>
+                </p>
+              )
+            })()}
           <div className="actions">
             <button onClick={() => setStep('format')} disabled={exporting}>
               ← Voltar

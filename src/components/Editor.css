@@ -69,7 +69,7 @@
 .crop-rect {
   position: absolute;
   border: 2px dashed #fff;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7);
 }
 
 /* cantos de redimensionamento (o ponteiro é tratado pela overlay via hit-test) */
@@ -139,6 +139,10 @@
   font-size: 0.85rem;
   color: #888;
   text-align: center;
+}
+
+.hint .muted {
+  color: #666;
 }
 
 .format {
