@@ -1,0 +1,32 @@
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+  text-align: center;
+}
+
+.subtitle {
+  color: #888;
+  margin-top: 0.25rem;
+}
+
+.stages {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  list-style: none;
+  padding: 0;
+  margin: 2rem 0;
+}
+
+.stages li {
+  padding: 0.5rem 1rem;
+  border: 1px solid #444;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.status {
+  color: #666;
+  font-size: 0.85rem;
+}
