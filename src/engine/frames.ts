@@ -29,9 +29,10 @@ function border(id: string, label: string, color: string): Frame {
 const phone: Frame = {
   id: 'phone',
   label: 'Celular',
-  layout(): FrameLayout {
-    const SW = 500
-    const SH = 1083
+  layout(srcW): FrameLayout {
+    // largura da tela acompanha a gravação, limitada a 360–400px; altura fixa
+    const SW = Math.round(Math.max(360, Math.min(srcW, 400)))
+    const SH = 800
     const BEZEL = 12
     return {
       width: SW + 2 * BEZEL,

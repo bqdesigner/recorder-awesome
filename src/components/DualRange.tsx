@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import './DualRange.css'
 
 interface Props {
@@ -8,21 +9,68 @@ interface Props {
   end: number
   onStart: (v: number) => void
   onEnd: (v: number) => void
+  /** Posição do playhead (s) a marcar; null = oculto. */
+  current?: number | null
+  /** Clique/arrasto em qualquer ponto da timeline. */
+  onSeek?: (t: number) => void
 }
 
-/** Timeline com dois controles (início/fim) sobre o mesmo trilho. */
-function DualRange({ min, max, step = 0.1, start, end, onStart, onEnd }: Props) {
+/** Timeline com dois controles (início/fim) e scrub livre. */
+function DualRange({
+  min,
+  max,
+  step = 0.1,
+  start,
+  end,
+  onStart,
+  onEnd,
+  current,
+  onSeek,
+}: Props) {
+  const ref = useRef<HTMLDivElement>(null)
+  const scrubbing = useRef(false)
   const span = max - min || 1
   const startPct = ((start - min) / span) * 100
   const endPct = ((end - min) / span) * 100
 
+  function timeAt(e: React.PointerEvent) {
+    const r = ref.current!.getBoundingClientRect()
+    const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))
+    return min + f * span
+  }
+  function onPointerDown(e: React.PointerEvent) {
+    // clique sobre um thumb (input) é tratado nativamente
+    if (!onSeek || (e.target as HTMLElement).tagName === 'INPUT') return
+    scrubbing.current = true
+    ref.current!.setPointerCapture(e.pointerId)
+    onSeek(timeAt(e))
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (scrubbing.current && onSeek) onSeek(timeAt(e))
+  }
+  function onPointerUp() {
+    scrubbing.current = false
+  }
+
   return (
-    <div className="dual">
+    <div
+      ref={ref}
+      className="dual"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
       <div className="dual-track" />
       <div
         className="dual-fill"
         style={{ left: `${startPct}%`, width: `${endPct - startPct}%` }}
       />
+      {current != null && (
+        <div
+          className="dual-playhead"
+          style={{ left: `${((current - min) / span) * 100}%` }}
+        />
+      )}
       <input
         type="range"
         className="dual-thumb"

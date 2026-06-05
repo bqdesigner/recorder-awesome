@@ -82,8 +82,12 @@ export function compose(
   canvas.height = height
   const ctx = canvas.getContext('2d')!
 
-  ctx.fillStyle = scene.background
-  ctx.fillRect(0, 0, width, height)
+  if (scene.background === 'transparent') {
+    ctx.clearRect(0, 0, width, height)
+  } else {
+    ctx.fillStyle = scene.background
+    ctx.fillRect(0, 0, width, height)
+  }
 
   ctx.save()
   ctx.translate(scene.padding, scene.padding)

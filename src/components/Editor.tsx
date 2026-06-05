@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { webmToGif, compose, FRAMES, type Crop, type Scene, type Fit } from '../engine'
+import {
+  webmToGif,
+  webmToMp4,
+  compose,
+  FRAMES,
+  type Crop,
+  type Scene,
+  type Fit,
+} from '../engine'
 import DualRange from './DualRange'
 import './Editor.css'
 
@@ -39,17 +47,27 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [cropMode, setCropMode] = useState(false)
   const [frameId, setFrameId] = useState('none')
   const [background, setBackground] = useState('#1e1e1e')
+  const [bgTransparent, setBgTransparent] = useState(false)
   const [screenFill, setScreenFill] = useState('#000000')
   const [fit, setFit] = useState<Fit>('fit')
   const [step, setStep] = useState<Step>('edit')
+  const [format, setFormat] = useState<'gif' | 'mp4'>('gif')
+  const [speed, setSpeed] = useState(1)
   const [exporting, setExporting] = useState(false)
   const [progress, setProgress] = useState(0)
   const [playing, setPlaying] = useState(true)
+  const [playhead, setPlayhead] = useState(0)
   const [ready, setReady] = useState(false)
   const trimRef = useRef({ start: 0, end: estDuration })
 
   const frame = frameId === 'none' ? null : FRAMES.find((f) => f.id === frameId) ?? null
-  const scene: Scene = { frame, background, fit, padding: frame ? 48 : 0, screenFill }
+  const scene: Scene = {
+    frame,
+    background: bgTransparent ? 'transparent' : background,
+    fit,
+    padding: frame ? 48 : 0,
+    screenFill,
+  }
   // na edição mostramos o vídeo cru (sem moldura); só formatação/exportação compõem
   const drawScene: Scene = step === 'edit' ? { ...scene, frame: null, padding: 0 } : scene
 
@@ -117,12 +135,17 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   // redesenha ao mudar recorte / moldura / background / encaixe
   useEffect(() => {
     drawRef.current()
-  }, [crop, cropMode, frameId, background, screenFill, fit, step])
+  }, [crop, cropMode, frameId, background, bgTransparent, screenFill, fit, step])
 
   // mantém o trecho do trim acessível ao loop sem fechar sobre estado obsoleto
   useEffect(() => {
     trimRef.current = { start: trimStart, end: trimEnd }
   }, [trimStart, trimEnd])
+
+  // velocidade de reprodução do preview
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = speed
+  }, [speed, playing, ready])
 
   // loop de reprodução: roda a gravação dentro do trecho do trim
   useEffect(() => {
@@ -229,14 +252,21 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   async function handleExport() {
     setExporting(true)
     setProgress(0)
-    const gif = await webmToGif(blob, duration, {
+    const opts = {
       start: trimStart,
       end: trimEnd,
       crop: crop ?? undefined,
       scene,
+      speed,
       onProgress: setProgress,
-    })
-    download(gif, 'gravacao.gif')
+    }
+    if (format === 'mp4') {
+      const mp4 = await webmToMp4(blob, duration, opts)
+      download(mp4, 'gravacao.mp4')
+    } else {
+      const gif = await webmToGif(blob, duration, opts)
+      download(gif, 'gravacao.gif')
+    }
     setExporting(false)
   }
 
@@ -252,8 +282,14 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
         ))}
       </ol>
 
-      <div className="stage">
+      <div
+        className={`stage${cropMode ? '' : ' clickable'}${bgTransparent ? ' checker' : ''}`}
+        onClick={() => {
+          if (!cropMode) setPlaying((p) => !p)
+        }}
+      >
         <canvas ref={canvasRef} className="preview" />
+        {!playing && !cropMode && <div className="play-overlay">▶</div>}
         <div
           ref={overlayRef}
           className={`crop-layer${step === 'edit' && cropMode ? ' active' : ''}`}
@@ -280,12 +316,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
         </div>
       </div>
 
-      <div className="playbar">
-        <button onClick={() => setPlaying((p) => !p)}>
-          {playing ? '⏸ Pausar' : '▶ Reproduzir'}
-        </button>
-      </div>
-
       {/* Etapa 1: editar (trim + crop) */}
       {step === 'edit' && (
         <>
@@ -297,6 +327,12 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
               end={trimEnd}
               onStart={changeStart}
               onEnd={changeEnd}
+              current={playing ? null : playhead}
+              onSeek={(t) => {
+                setPlaying(false)
+                setPlayhead(t)
+                seek(t)
+              }}
             />
             <p className="hint">
               {trimStart.toFixed(1)}s – {trimEnd.toFixed(1)}s ·{' '}
@@ -348,7 +384,16 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                 type="color"
                 value={background}
                 onChange={(e) => setBackground(e.target.value)}
+                disabled={bgTransparent}
               />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={bgTransparent}
+                onChange={(e) => setBgTransparent(e.target.checked)}
+              />
+              Transparente
             </label>
             <label>
               Encaixe
@@ -379,17 +424,47 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
 
       {/* Etapa 3: exportar */}
       {step === 'export' && (
-        <div className="actions">
-          <button onClick={() => setStep('format')} disabled={exporting}>
-            ← Voltar
-          </button>
-          <button onClick={onReset} disabled={exporting}>
-            Nova gravação
-          </button>
-          <button className="primary" onClick={handleExport} disabled={exporting}>
-            {exporting ? `Exportando… ${Math.round(progress * 100)}%` : 'Exportar GIF'}
-          </button>
-        </div>
+        <>
+          <div className="format">
+            <label>
+              Formato
+              <select
+                value={format}
+                onChange={(e) => setFormat(e.target.value as 'gif' | 'mp4')}
+                disabled={exporting}
+              >
+                <option value="gif">GIF</option>
+                <option value="mp4">MP4 (vídeo)</option>
+              </select>
+            </label>
+            <label>
+              Velocidade
+              <select
+                value={speed}
+                onChange={(e) => setSpeed(+e.target.value)}
+                disabled={exporting}
+              >
+                <option value={0.5}>0.5x</option>
+                <option value={1}>1x</option>
+                <option value={1.5}>1.5x</option>
+                <option value={2}>2x</option>
+              </select>
+            </label>
+          </div>
+          <div className="actions">
+            <button onClick={() => setStep('format')} disabled={exporting}>
+              ← Voltar
+            </button>
+            <button onClick={onReset} disabled={exporting}>
+              Nova gravação
+            </button>
+            <button className="primary" onClick={handleExport} disabled={exporting}>
+              {exporting
+                ? `Exportando… ${Math.round(progress * 100)}%`
+                : `Exportar ${format.toUpperCase()}`}
+            </button>
+          </div>
+        </>
       )}
     </div>
   )

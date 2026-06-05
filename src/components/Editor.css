@@ -48,6 +48,11 @@
   background: #000;
 }
 
+/* deixa os pixels transparentes do canvas revelarem o xadrez */
+.stage.checker .preview {
+  background: transparent;
+}
+
 /* camada de recorte cobre exatamente o frame; só intercepta no modo recorte */
 .crop-layer {
   position: absolute;
@@ -95,10 +100,33 @@
   right: -7px;
 }
 
-.playbar {
+.stage.clickable {
+  cursor: pointer;
+}
+
+/* xadrez indicando área transparente */
+.stage.checker {
+  background-image:
+    linear-gradient(45deg, #555 25%, transparent 25%),
+    linear-gradient(-45deg, #555 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #555 75%),
+    linear-gradient(-45deg, transparent 75%, #555 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-color: #777;
+}
+
+/* indicador de pausa sobre a gravação */
+.play-overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
+  align-items: center;
   justify-content: center;
-  margin-top: 0.75rem;
+  font-size: 3rem;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
 }
 
 .controls {
@@ -128,6 +156,14 @@
   font-size: 0.85rem;
   color: #aaa;
   text-align: left;
+}
+
+.format label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: end;
+  color: #ccc;
 }
 
 .format input[type='color'] {

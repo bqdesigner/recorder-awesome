@@ -1,6 +1,24 @@
 .dual {
   position: relative;
   height: 28px;
+  cursor: pointer;
+}
+
+.dual-track,
+.dual-fill,
+.dual-playhead {
+  pointer-events: none;
+}
+
+/* marcador de posição da animação */
+.dual-playhead {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background: #fff;
+  border-radius: 1px;
+  transform: translateX(-1px);
 }
 
 .dual-track,
