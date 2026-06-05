@@ -1,1 +1,5 @@
 export type { ExportFormat, Stage } from './types'
+export { startRecording } from './capture'
+export type { Recording, RecordingSession } from './capture'
+export { webmToGif } from './encode'
+export type { GifOptions } from './encode'
