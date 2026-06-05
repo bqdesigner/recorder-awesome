@@ -1,0 +1,69 @@
+.editor {
+  margin-top: 1.5rem;
+}
+
+/* vídeo é só fonte de frames; renderizado fora da tela (display:none pode
+   impedir a decodificação em alguns browsers) */
+.source {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  top: -9999px;
+  left: -9999px;
+}
+
+.stage {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.preview {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  background: #000;
+}
+
+/* camada de recorte cobre exatamente o frame; só intercepta no modo recorte */
+.crop-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.crop-layer.active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.crop-rect {
+  position: absolute;
+  border: 2px dashed #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+}
+
+.controls {
+  margin-top: 1rem;
+  max-width: 480px;
+  margin-inline: auto;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: #888;
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 1rem;
+}

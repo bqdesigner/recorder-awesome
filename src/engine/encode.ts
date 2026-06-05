@@ -2,11 +2,25 @@
 
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
 
+/** Recorte da fonte, em frações 0..1 do frame original. */
+export interface Crop {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface GifOptions {
   /** Quadros por segundo do GIF. Default 12. */
   fps?: number
-  /** Largura máxima em px; mantém proporção. Default 640. */
+  /** Largura máxima em px; mantém proporção. Default = resolução original. */
   maxWidth?: number
+  /** Início do trecho em segundos. Default 0. */
+  start?: number
+  /** Fim do trecho em segundos. Default = duração. */
+  end?: number
+  /** Recorte da região. Default = frame inteiro. */
+  crop?: Crop
   /** Progresso 0..1. */
   onProgress?: (p: number) => void
 }
@@ -62,28 +76,43 @@ export async function webmToGif(
   opts: GifOptions = {},
 ): Promise<Blob> {
   const fps = opts.fps ?? 12
-  const maxWidth = opts.maxWidth ?? 640
 
   const video = await loadVideo(blob, duration)
   const realDuration =
     (video as HTMLVideoElement & { _duration: number })._duration
 
-  const scale = Math.min(1, maxWidth / video.videoWidth)
-  const width = Math.round(video.videoWidth * scale)
-  const height = Math.round(video.videoHeight * scale)
+  const vw = video.videoWidth
+  const vh = video.videoHeight
+
+  // região de origem (crop em px), default frame inteiro
+  const crop = opts.crop
+  const sx = crop ? crop.x * vw : 0
+  const sy = crop ? crop.y * vh : 0
+  const sw = crop ? crop.w * vw : vw
+  const sh = crop ? crop.h * vh : vh
+
+  // sem maxWidth = resolução original (frame/crop em px nativos)
+  const scale = opts.maxWidth ? Math.min(1, opts.maxWidth / sw) : 1
+  const width = Math.max(1, Math.round(sw * scale))
+  const height = Math.max(1, Math.round(sh * scale))
 
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
 
+  // trecho a exportar (trim)
+  const start = Math.max(0, opts.start ?? 0)
+  const end = Math.min(realDuration, opts.end ?? realDuration)
+  const span = Math.max(0, end - start)
+
   const gif = GIFEncoder()
   const delay = Math.round(1000 / fps)
-  const frameCount = Math.max(1, Math.round(realDuration * fps))
+  const frameCount = Math.max(1, Math.round(span * fps))
 
   for (let i = 0; i < frameCount; i++) {
-    await seekTo(video, i / fps)
-    ctx.drawImage(video, 0, 0, width, height)
+    await seekTo(video, start + i / fps)
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height)
     const { data } = ctx.getImageData(0, 0, width, height)
     const palette = quantize(data, 256)
     const index = applyPalette(data, palette)
