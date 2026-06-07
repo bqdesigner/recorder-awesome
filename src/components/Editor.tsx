@@ -9,7 +9,11 @@ import {
   type Scene,
   type Fit,
 } from '../engine'
+import Accordion from './Accordion'
+import ColorPicker from './ColorPicker'
+import Footer from './Footer'
 import DualRange from './DualRange'
+import '../App.css'
 import './Editor.css'
 
 interface Props {
@@ -22,18 +26,17 @@ interface Props {
 
 const MIN_CROP = 0.02 // recortes menores que isso = limpar
 
-type Step = 'edit' | 'format' | 'export'
+type Section = 'edit' | 'format' | 'export'
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
 type Drag =
   | { mode: 'new'; ox: number; oy: number } // âncora = ponto inicial
   | { mode: 'resize'; ox: number; oy: number } // âncora = canto oposto
   | { mode: 'move'; dx: number; dy: number } // offset do ponteiro até o canto sup-esq
 
-const STEPS: { id: Step; label: string }[] = [
-  { id: 'edit', label: 'Editar' },
-  { id: 'format', label: 'Formatar' },
-  { id: 'export', label: 'Exportar' },
-]
+type ExportState = { kind: 'idle' } | { kind: 'download'; progress: number }
+
+// ordem das seções para o gating sequencial (editar → formatar → exportar)
+const ORDER: Section[] = ['edit', 'format', 'export']
 
 function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -51,18 +54,25 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [bgTransparent, setBgTransparent] = useState(false)
   const [screenFill, setScreenFill] = useState('#000000')
   const [fit, setFit] = useState<Fit>('fit')
-  const [step, setStep] = useState<Step>('edit')
   const [format, setFormat] = useState<'gif' | 'mp4'>('gif')
   const [speed, setSpeed] = useState(1)
   const [fps, setFps] = useState(15)
   const [scale, setScale] = useState(1)
-  const [dither, setDither] = useState(true)
-  const [exporting, setExporting] = useState(false)
-  const [progress, setProgress] = useState(0)
   const [playing, setPlaying] = useState(true)
   const [playhead, setPlayhead] = useState(0)
   const [ready, setReady] = useState(false)
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+
+  // navegação: qual seção está aberta + até onde o fluxo foi liberado
+  const [open, setOpen] = useState<Section | null>('edit')
+  const [maxUnlocked, setMaxUnlocked] = useState(0) // 0=edit, 1=format, 2=export
+  const [exportState, setExportState] = useState<ExportState>({ kind: 'idle' })
+
   const trimRef = useRef({ start: 0, end: estDuration })
+  const dither = true // dithering sempre ligado (sem controle na UI)
+
+  const unlocked = (s: Section) => ORDER.indexOf(s) <= maxUnlocked
+  const busy = exportState.kind === 'download'
 
   const frame = frameId === 'none' ? null : FRAMES.find((f) => f.id === frameId) ?? null
   const scene: Scene = {
@@ -72,8 +82,9 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     padding: frame ? 48 : 0,
     screenFill,
   }
-  // na edição mostramos o vídeo cru (sem moldura); só formatação/exportação compõem
-  const drawScene: Scene = step === 'edit' ? { ...scene, frame: null, padding: 0 } : scene
+  // na edição mostramos o vídeo cru (sem moldura); formatar/exportar compõem
+  const drawScene: Scene =
+    open === 'edit' ? { ...scene, frame: null, padding: 0 } : scene
 
   // desenha o frame atual no canvas
   function drawFrame() {
@@ -82,7 +93,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     if (!v || !c || !v.videoWidth) return
     const vw = v.videoWidth
     const vh = v.videoHeight
-    // no modo recorte mostramos o frame cru, pra selecionar a região
     if (cropMode) {
       c.width = vw
       c.height = vh
@@ -94,7 +104,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
       : { x: 0, y: 0, w: vw, h: vh }
     compose(c, v, src, drawScene)
   }
-  // mantém o ref com a versão atual (usado pelo listener 'seeked')
   useEffect(() => {
     drawRef.current = drawFrame
   })
@@ -114,7 +123,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
           setTrimEnd(d)
         }
         v.currentTime = 0
-        setReady(true) // libera o loop de reprodução só após medir a duração
+        if (v.videoWidth) setDims({ w: v.videoWidth, h: v.videoHeight })
+        setReady(true)
       }
       if (isFinite(v.duration) && v.duration > 0) {
         finish(v.duration)
@@ -124,7 +134,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
           finish(v.duration)
         }
         v.addEventListener('seeked', once)
-        v.currentTime = 1e7 // força o cálculo da duração real
+        v.currentTime = 1e7
       }
     }
     if (v.readyState >= 1) ready()
@@ -136,17 +146,15 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     }
   }, [])
 
-  // redesenha ao mudar recorte / moldura / background / encaixe
+  // redesenha ao mudar recorte / moldura / background / encaixe / seção
   useEffect(() => {
     drawRef.current()
-  }, [crop, cropMode, frameId, background, bgTransparent, screenFill, fit, step])
+  }, [crop, cropMode, frameId, background, bgTransparent, screenFill, fit, open])
 
-  // mantém o trecho do trim acessível ao loop sem fechar sobre estado obsoleto
   useEffect(() => {
     trimRef.current = { start: trimStart, end: trimEnd }
   }, [trimStart, trimEnd])
 
-  // velocidade de reprodução do preview
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed
   }, [speed, playing, ready])
@@ -192,7 +200,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
       y: clamp01((e.clientY - r.top) / r.height),
     }
   }
-  /** Qual canto do crop está sob o ponteiro (margem de 16px), se algum. */
   function hitCorner(e: React.PointerEvent, c: Crop): Corner | null {
     const r = overlayRef.current!.getBoundingClientRect()
     const corners: Record<Corner, [number, number]> = {
@@ -214,7 +221,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     const p = frac(e)
     const corner = crop ? hitCorner(e, crop) : null
     if (crop && corner) {
-      // âncora = canto oposto ao agarrado
       const ox = corner === 'nw' || corner === 'sw' ? crop.x + crop.w : crop.x
       const oy = corner === 'nw' || corner === 'ne' ? crop.y + crop.h : crop.y
       drag.current = { mode: 'resize', ox, oy }
@@ -253,33 +259,47 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     setCrop((c) => (c && c.w > MIN_CROP && c.h > MIN_CROP ? c : null))
   }
 
-  async function handleExport() {
-    setExporting(true)
-    setProgress(0)
+  // --- navegação entre seções ---
+  function toggle(s: Section) {
+    setOpen((cur) => (cur === s ? null : s))
+  }
+  function advance(to: Section) {
+    setCropMode(false)
+    setMaxUnlocked((m) => Math.max(m, ORDER.indexOf(to)))
+    setOpen(to)
+  }
+
+  // --- exportação (baixar / copiar) ---
+  async function runExport() {
     const opts = {
       start: trimStart,
       end: trimEnd,
       crop: crop ?? undefined,
       scene,
       speed,
-      onProgress: setProgress,
     }
-    if (format === 'mp4') {
-      const mp4 = await webmToMp4(blob, duration, opts)
-      download(mp4, 'gravacao.mp4')
-    } else {
-      const gif = await webmToGif(blob, duration, { ...opts, fps, scale, dither })
-      download(gif, 'gravacao.gif')
-    }
-    setExporting(false)
+    const onProgress = (p: number) =>
+      setExportState((s) => (s.kind === 'download' ? { ...s, progress: p } : s))
+    return format === 'mp4'
+      ? webmToMp4(blob, duration, { ...opts, onProgress })
+      : webmToGif(blob, duration, { ...opts, onProgress, fps, scale, dither })
   }
 
-  // dimensões e tamanho estimado da saída GIF (guia o trade-off qualidade/tamanho)
+  async function handleDownload() {
+    setExportState({ kind: 'download', progress: 0 })
+    try {
+      const out = await runExport()
+      download(out, format === 'mp4' ? 'gravacao.mp4' : 'gravacao.gif')
+    } finally {
+      setExportState({ kind: 'idle' })
+    }
+  }
+
+  // dimensões e tamanho estimado da saída GIF
   function gifEstimate() {
-    const v = videoRef.current
-    if (!v || !v.videoWidth) return null
-    const vw = v.videoWidth
-    const vh = v.videoHeight
+    if (!dims) return null
+    const vw = dims.w
+    const vh = dims.h
     const srcW = crop ? crop.w * vw : vw
     const srcH = crop ? crop.h * vh : vh
     const { width, height } = composedSize(scene, srcW, srcH)
@@ -287,257 +307,256 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     const oh = Math.max(1, Math.round(height * scale))
     const span = Math.max(0, (trimEnd - trimStart) / speed)
     const frames = Math.max(1, Math.round(span * fps))
-    // heurística grosseira: ~0.18 byte/pixel após LZW em conteúdo de tela
     const mb = (frames * ow * oh * 0.18) / 1e6
     return { ow, oh, frames, mb }
   }
 
+  const est = format === 'gif' ? gifEstimate() : null
+  const showEstimate = (open === 'format' || open === 'export') && est
+
+  const overlayText =
+    exportState.kind === 'download'
+      ? `${Math.round(exportState.progress * 100)}% Baixando...`
+      : null
+
   return (
-    <div className="editor">
+    <div className="app">
       <video ref={videoRef} src={previewUrl} muted playsInline className="source" />
 
-      <ol className="stepper">
-        {STEPS.map((s, i) => (
-          <li key={s.id} className={s.id === step ? 'on' : ''}>
-            {i + 1}. {s.label}
-          </li>
-        ))}
-      </ol>
-
-      <div
-        className={`stage${cropMode ? '' : ' clickable'}${bgTransparent ? ' checker' : ''}`}
-        onClick={() => {
-          if (!cropMode) setPlaying((p) => !p)
-        }}
-      >
-        <canvas ref={canvasRef} className="preview" />
-        {!playing && !cropMode && <div className="play-overlay">▶</div>}
+      {/* bloco de gravação */}
+      <section className="recorder">
         <div
-          ref={overlayRef}
-          className={`crop-layer${step === 'edit' && cropMode ? ' active' : ''}`}
-          onPointerDown={cropMode ? onPointerDown : undefined}
-          onPointerMove={cropMode ? onPointerMove : undefined}
-          onPointerUp={cropMode ? onPointerUp : undefined}
+          className={`stage${cropMode || busy ? '' : ' clickable'}${
+            bgTransparent ? ' checker' : ''
+          }`}
+          onClick={() => {
+            if (!cropMode && !busy) setPlaying((p) => !p)
+          }}
         >
-          {step === 'edit' && cropMode && crop && (
-            <div
-              className="crop-rect"
-              style={{
-                left: `${crop.x * 100}%`,
-                top: `${crop.y * 100}%`,
-                width: `${crop.w * 100}%`,
-                height: `${crop.h * 100}%`,
-              }}
-            >
-              <span className="handle nw" />
-              <span className="handle ne" />
-              <span className="handle sw" />
-              <span className="handle se" />
-            </div>
-          )}
+          <canvas ref={canvasRef} className="preview" />
+          {!playing && !cropMode && !overlayText && <div className="play-overlay">▶</div>}
+          <div
+            ref={overlayRef}
+            className={`crop-layer${cropMode ? ' active' : ''}`}
+            onPointerDown={cropMode ? onPointerDown : undefined}
+            onPointerMove={cropMode ? onPointerMove : undefined}
+            onPointerUp={cropMode ? onPointerUp : undefined}
+          >
+            {cropMode && crop && (
+              <div
+                className="crop-rect"
+                style={{
+                  left: `${crop.x * 100}%`,
+                  top: `${crop.y * 100}%`,
+                  width: `${crop.w * 100}%`,
+                  height: `${crop.h * 100}%`,
+                }}
+              >
+                <span className="handle nw" />
+                <span className="handle ne" />
+                <span className="handle sw" />
+                <span className="handle se" />
+              </div>
+            )}
+          </div>
+          {overlayText && <div className="stage__overlay">{overlayText}</div>}
         </div>
-      </div>
 
-      {/* Etapa 1: editar (trim + crop) */}
-      {step === 'edit' && (
-        <>
-          <div className="controls">
-            <DualRange
-              min={0}
-              max={duration}
-              start={trimStart}
-              end={trimEnd}
-              onStart={changeStart}
-              onEnd={changeEnd}
-              current={playing ? null : playhead}
-              onSeek={(t) => {
-                setPlaying(false)
-                setPlayhead(t)
-                seek(t)
-              }}
-            />
-            <p className="hint">
-              {trimStart.toFixed(1)}s – {trimEnd.toFixed(1)}s ·{' '}
-              {(trimEnd - trimStart).toFixed(1)}s ·{' '}
-              {cropMode
-                ? 'arraste no frame pra recortar'
-                : crop
-                  ? 'recorte aplicado'
-                  : 'frame inteiro'}
-            </p>
-          </div>
-          <div className="actions">
-            <button onClick={() => setCropMode((m) => !m)} aria-pressed={cropMode}>
-              {cropMode ? 'Concluir recorte' : 'Recortar'}
-            </button>
-            {crop && <button onClick={() => setCrop(null)}>Limpar recorte</button>}
-            <button onClick={onReset}>Nova gravação</button>
-            <button
-              className="primary"
-              onClick={() => {
-                setCropMode(false)
-                setStep('format')
-              }}
-            >
-              Avançar →
-            </button>
-          </div>
-        </>
-      )}
+        {open === 'edit' && (
+          <DualRange
+            min={0}
+            max={duration}
+            start={trimStart}
+            end={trimEnd}
+            onStart={changeStart}
+            onEnd={changeEnd}
+            current={playing ? null : playhead}
+            onSeek={(t) => {
+              setPlaying(false)
+              setPlayhead(t)
+              seek(t)
+            }}
+          />
+        )}
 
-      {/* Etapa 2: formatar (moldura, background, fit, cor da tela) */}
-      {step === 'format' && (
-        <>
-          <div className="format">
-            <label>
-              Moldura
-              <select value={frameId} onChange={(e) => setFrameId(e.target.value)}>
-                <option value="none">Nenhuma</option>
+        {showEstimate && (
+          <p className="estimate">
+            {est!.ow}×{est!.oh}px · {est!.frames} frames · ~{est!.mb.toFixed(1)} MB
+            (estimativa)
+          </p>
+        )}
+
+        <Footer />
+      </section>
+
+      {/* bloco de edição */}
+      <aside className="panel">
+        <div className="panel__content">
+          {/* Editar */}
+          <Accordion title="Editar" open={open === 'edit'} onToggle={() => toggle('edit')}>
+            <div className="actions">
+              <button
+                className="btn"
+                aria-pressed={cropMode}
+                onClick={() => setCropMode((m) => !m)}
+              >
+                {cropMode ? 'Concluir recorte' : 'Recortar'}
+              </button>
+              <button className="btn" onClick={() => setCrop(null)} disabled={!crop}>
+                Limpar corte
+              </button>
+            </div>
+          </Accordion>
+
+          {/* Formatar */}
+          <Accordion
+            title="Formatar"
+            open={open === 'format'}
+            onToggle={() => toggle('format')}
+          >
+            <fieldset className="section-body" disabled={!unlocked('format')}>
+              <select
+                className="field field--select"
+                value={frameId}
+                onChange={(e) => setFrameId(e.target.value)}
+              >
+                <option value="none">Moldura</option>
                 {FRAMES.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.label}
                   </option>
                 ))}
               </select>
-            </label>
-            <label>
-              Background
-              <input
-                type="color"
-                value={background}
-                onChange={(e) => setBackground(e.target.value)}
-                disabled={bgTransparent}
-              />
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={bgTransparent}
-                onChange={(e) => setBgTransparent(e.target.checked)}
-              />
-              Transparente
-            </label>
-            <label>
-              Encaixe
-              <select value={fit} onChange={(e) => setFit(e.target.value as Fit)}>
-                <option value="fit">Cabe inteiro (fit)</option>
-                <option value="fill">Preenche (fill)</option>
-              </select>
-            </label>
-            {frame && (
-              <label>
-                Cor da tela
-                <input
-                  type="color"
-                  value={screenFill}
-                  onChange={(e) => setScreenFill(e.target.value)}
-                />
-              </label>
-            )}
-          </div>
-          <div className="actions">
-            <button onClick={() => setStep('edit')}>← Voltar</button>
-            <button className="primary" onClick={() => setStep('export')}>
-              Avançar →
-            </button>
-          </div>
-        </>
-      )}
 
-      {/* Etapa 3: exportar */}
-      {step === 'export' && (
-        <>
-          <div className="format">
-            <label>
-              Formato
-              <select
-                value={format}
-                onChange={(e) => setFormat(e.target.value as 'gif' | 'mp4')}
-                disabled={exporting}
-              >
-                <option value="gif">GIF</option>
-                <option value="mp4">MP4 (vídeo)</option>
-              </select>
-            </label>
-            <label>
-              Velocidade
-              <select
-                value={speed}
-                onChange={(e) => setSpeed(+e.target.value)}
-                disabled={exporting}
-              >
-                <option value={0.5}>0.5x</option>
-                <option value={1}>1x</option>
-                <option value={1.5}>1.5x</option>
-                <option value={2}>2x</option>
-              </select>
-            </label>
-            {format === 'gif' && (
-              <>
-                <label>
-                  FPS
-                  <select
-                    value={fps}
-                    onChange={(e) => setFps(+e.target.value)}
-                    disabled={exporting}
-                  >
-                    <option value={10}>10 (menor)</option>
-                    <option value={15}>15</option>
-                    <option value={20}>20</option>
-                    <option value={24}>24 (suave)</option>
-                  </select>
-                </label>
-                <label>
-                  Resolução
-                  <select
-                    value={scale}
-                    onChange={(e) => setScale(+e.target.value)}
-                    disabled={exporting}
-                  >
-                    <option value={1}>100%</option>
-                    <option value={0.75}>75%</option>
-                    <option value={0.5}>50%</option>
-                  </select>
-                </label>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={dither}
-                    onChange={(e) => setDither(e.target.checked)}
-                    disabled={exporting}
-                  />
-                  Suavizar cores (dithering)
-                </label>
-              </>
-            )}
-          </div>
-          {format === 'gif' &&
-            !exporting &&
-            (() => {
-              const est = gifEstimate()
-              if (!est) return null
-              return (
-                <p className="hint">
-                  {est.ow}×{est.oh}px · {est.frames} frames · ~{est.mb.toFixed(1)} MB
-                  <span className="muted"> (estimativa)</span>
-                </p>
-              )
-            })()}
-          <div className="actions">
-            <button onClick={() => setStep('format')} disabled={exporting}>
-              ← Voltar
+              <div className="segment">
+                <button
+                  className={`segment__item${fit === 'fit' ? ' segment__item--active' : ''}`}
+                  onClick={() => setFit('fit')}
+                >
+                  Fit
+                </button>
+                <button
+                  className={`segment__item${fit === 'fill' ? ' segment__item--active' : ''}`}
+                  onClick={() => setFit('fill')}
+                >
+                  Fill
+                </button>
+              </div>
+
+              <div className="field field--color">
+                <span>
+                  Cor de fundo{' '}
+                  {bgTransparent && <span className="muted">– Transparente</span>}
+                </span>
+                <ColorPicker
+                  value={background}
+                  transparent={bgTransparent}
+                  onChange={(h) => {
+                    setBackground(h)
+                    setBgTransparent(false)
+                  }}
+                  onTransparent={() => setBgTransparent(true)}
+                />
+              </div>
+
+              {frame && (
+                <div className="field field--color">
+                  <span>Cor da tela</span>
+                  <ColorPicker value={screenFill} onChange={setScreenFill} />
+                </div>
+              )}
+            </fieldset>
+          </Accordion>
+
+          {/* Exportar */}
+          <Accordion
+            title="Exportar"
+            open={open === 'export'}
+            onToggle={() => toggle('export')}
+          >
+            <fieldset className="section-body" disabled={!unlocked('export') || busy}>
+              <div className="segment">
+                <button
+                  className={`segment__item${format === 'gif' ? ' segment__item--active' : ''}`}
+                  onClick={() => setFormat('gif')}
+                >
+                  GIF
+                </button>
+                <button
+                  className={`segment__item${format === 'mp4' ? ' segment__item--active' : ''}`}
+                  onClick={() => setFormat('mp4')}
+                >
+                  MP4
+                </button>
+              </div>
+              <div className="row">
+                <select
+                  className="field field--select"
+                  value={speed}
+                  onChange={(e) => setSpeed(+e.target.value)}
+                >
+                  <option value={0.5}>0.5x</option>
+                  <option value={1}>1x</option>
+                  <option value={1.5}>1.5x</option>
+                  <option value={2}>2x</option>
+                </select>
+                <select
+                  className="field field--select"
+                  value={fps}
+                  onChange={(e) => setFps(+e.target.value)}
+                  disabled={format !== 'gif'}
+                >
+                  <option value={10}>10 FPS</option>
+                  <option value={15}>15 FPS</option>
+                  <option value={20}>20 FPS</option>
+                  <option value={24}>24 FPS</option>
+                </select>
+                <select
+                  className="field field--select field--res"
+                  value={scale}
+                  onChange={(e) => setScale(+e.target.value)}
+                  disabled={format !== 'gif'}
+                >
+                  <option value={1}>100%</option>
+                  <option value={0.75}>75%</option>
+                  <option value={0.5}>50%</option>
+                </select>
+              </div>
+            </fieldset>
+          </Accordion>
+        </div>
+
+        {/* ações inferiores, conforme a seção aberta */}
+        <div className="panel__actions">
+          <button className="btn" onClick={onReset} disabled={busy}>
+            Nova gravação
+          </button>
+
+          {open === 'edit' && (
+            <button className="btn" onClick={() => advance('format')}>
+              Próximo: formatar
             </button>
-            <button onClick={onReset} disabled={exporting}>
-              Nova gravação
+          )}
+          {open === 'format' && (
+            <button
+              className="btn"
+              onClick={() => advance('export')}
+              disabled={!unlocked('format')}
+            >
+              Próximo: exportar
             </button>
-            <button className="primary" onClick={handleExport} disabled={exporting}>
-              {exporting
-                ? `Exportando… ${Math.round(progress * 100)}%`
-                : `Exportar ${format.toUpperCase()}`}
+          )}
+          {open === 'export' && (
+            <button
+              className="btn"
+              onClick={handleDownload}
+              disabled={!unlocked('export') || busy}
+            >
+              Baixar
             </button>
-          </div>
-        </>
-      )}
+          )}
+        </div>
+      </aside>
     </div>
   )
 }

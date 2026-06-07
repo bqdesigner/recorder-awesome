@@ -1,0 +1,76 @@
+.cp {
+  position: relative;
+  display: flex;
+}
+
+.cp .swatch {
+  padding: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.cp__pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 200px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.cp__opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+}
+.cp__opt.is-active {
+  border-color: var(--ink);
+}
+
+.cp__hex {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+}
+.cp__hash {
+  color: var(--muted-2);
+}
+.cp__hex input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: none;
+  font: inherit;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.cp__visual {
+  width: 100%;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
