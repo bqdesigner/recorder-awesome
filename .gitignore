@@ -16,3 +16,9 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# AI harness skills (impeccable) — tooling local, fora do commit
+.claude/
+.agents/
+.cursor/
+.impeccable/

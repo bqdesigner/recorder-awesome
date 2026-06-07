@@ -1,195 +1,105 @@
-.editor {
-  margin-top: 1.5rem;
-}
-
-.stepper {
-  display: flex;
-  gap: 1.5rem;
-  justify-content: center;
-  list-style: none;
-  padding: 0;
-  margin: 0 0 1rem;
-}
-
-.stepper li {
-  font-size: 0.85rem;
-  color: #666;
-}
-
-.stepper li.on {
-  color: #4a9eff;
-  font-weight: 600;
-}
-
-/* vídeo é só fonte de frames; renderizado fora da tela (display:none pode
-   impedir a decodificação em alguns browsers) */
 .source {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-  top: -9999px;
-  left: -9999px;
+  display: none;
 }
 
+/* ---- palco do preview ---- */
 .stage {
   position: relative;
-  display: inline-block;
-  line-height: 0;
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: min(728px, 100%);
   border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+.stage.clickable {
+  cursor: pointer;
+}
+.stage.checker {
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
 .preview {
   display: block;
+  width: auto;
+  height: auto;
   max-width: 100%;
-  max-height: 60vh;
-  background: #000;
+  max-height: calc(100vh - 130px);
 }
 
-/* deixa os pixels transparentes do canvas revelarem o xadrez */
-.stage.checker .preview {
-  background: transparent;
-}
-
-/* camada de recorte cobre exatamente o frame; só intercepta no modo recorte */
-.crop-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  touch-action: none;
-}
-
-.crop-layer.active {
-  pointer-events: auto;
-  cursor: crosshair;
-}
-
-.crop-rect {
-  position: absolute;
-  border: 2px dashed #fff;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7);
-}
-
-/* cantos de redimensionamento (o ponteiro é tratado pela overlay via hit-test) */
-.handle {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  background: #fff;
-  border: 1px solid #4a9eff;
-  border-radius: 2px;
-  pointer-events: none;
-}
-
-.handle.nw {
-  top: -7px;
-  left: -7px;
-}
-.handle.ne {
-  top: -7px;
-  right: -7px;
-}
-.handle.sw {
-  bottom: -7px;
-  left: -7px;
-}
-.handle.se {
-  bottom: -7px;
-  right: -7px;
-}
-
-.stage.clickable {
-  cursor: pointer;
-}
-
-/* xadrez indicando área transparente */
-.stage.checker {
-  background-image:
-    linear-gradient(45deg, #555 25%, transparent 25%),
-    linear-gradient(-45deg, #555 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #555 75%),
-    linear-gradient(-45deg, transparent 75%, #555 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-  background-color: #777;
-}
-
-/* indicador de pausa sobre a gravação */
 .play-overlay {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 3rem;
+  font-size: 48px;
   color: rgba(255, 255, 255, 0.85);
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
 
-.controls {
-  margin-top: 1rem;
-  max-width: 480px;
-  margin-inline: auto;
-}
-
-.hint {
-  font-size: 0.85rem;
-  color: #888;
+/* overlay de exportação (baixando / copiando / sucesso) */
+.stage__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 18px;
+  letter-spacing: 0.5px;
   text-align: center;
 }
 
-.hint .muted {
-  color: #666;
+/* ---- recorte ---- */
+.crop-layer {
+  position: absolute;
+  inset: 0;
+}
+.crop-layer.active {
+  cursor: crosshair;
+}
+.crop-rect {
+  position: absolute;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+}
+.handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+.handle.nw {
+  left: -6px;
+  top: -6px;
+}
+.handle.ne {
+  right: -6px;
+  top: -6px;
+}
+.handle.sw {
+  left: -6px;
+  bottom: -6px;
+}
+.handle.se {
+  right: -6px;
+  bottom: -6px;
 }
 
-.format {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  justify-content: center;
-  margin-top: 1rem;
-}
-
-.format label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  color: #aaa;
-  text-align: left;
-}
-
-.format label.check {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
-  align-self: end;
-  color: #ccc;
-}
-
-.format input[type='color'] {
-  width: 48px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid #444;
-  border-radius: 6px;
-  background: none;
-  cursor: pointer;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  justify-content: center;
-  margin-top: 1rem;
-}
-
-.actions .primary {
-  background: #4a9eff;
-  color: #fff;
-  border-color: #4a9eff;
+/* ---- estimativa do GIF ---- */
+.estimate {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  text-align: center;
 }

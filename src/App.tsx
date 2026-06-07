@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { startRecording, type Recording, type RecordingSession } from './engine'
+import Accordion from './components/Accordion'
+import Footer from './components/Footer'
 import Editor from './components/Editor'
 import './App.css'
 
 type Status = 'idle' | 'recording' | 'recorded'
+type Section = 'edit' | 'format' | 'export'
 
 function App() {
   const [status, setStatus] = useState<Status>('idle')
-  const [previewUrl, setPreviewUrl] = useState<string>('')
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [open, setOpen] = useState<Section | null>(null)
   const sessionRef = useRef<RecordingSession | null>(null)
   const recordingRef = useRef<Recording | null>(null)
 
@@ -23,7 +27,6 @@ function App() {
     try {
       sessionRef.current = await startRecording()
       setStatus('recording')
-      // se o usuário parar pelo browser, a track encerra: refletimos na UI
       sessionRef.current.stream
         .getVideoTracks()[0]
         ?.addEventListener('ended', () => finishRecording())
@@ -44,37 +47,126 @@ function App() {
 
   function handleReset() {
     if (recordingRef.current) {
-      const ok = window.confirm(
-        'Isso descarta a gravação atual. Quer continuar?',
-      )
+      const ok = window.confirm('Isso descarta a gravação atual. Quer continuar?')
       if (!ok) return
     }
     if (previewUrl) URL.revokeObjectURL(previewUrl)
     sessionRef.current = null
     recordingRef.current = null
     setPreviewUrl('')
+    setOpen(null)
     setStatus('idle')
   }
 
+  if (status === 'recorded' && recordingRef.current) {
+    return (
+      <Editor
+        blob={recordingRef.current.blob}
+        duration={recordingRef.current.duration}
+        previewUrl={previewUrl}
+        onReset={handleReset}
+      />
+    )
+  }
+
+  // estado vazio / gravando: hero à esquerda, accordions desabilitados à direita
+  const toggle = (s: Section) => setOpen((cur) => (cur === s ? null : s))
+  const recording = status === 'recording'
+
   return (
-    <main className="app">
-      <h1>screen-recorder</h1>
+    <div className="app">
+      <section className="recorder">
+        <div className="hero">
+          <div className="hero__heading">
+            <h1 className="hero__title">Recorder Awesome</h1>
+            <p className="hero__sub">
+              Grave sua tela - deixe ela incrível - compartilhe no seu projeto
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--solid btn--hero"
+            onClick={recording ? finishRecording : handleStart}
+          >
+            {recording ? 'Parar gravação' : 'Gravar tela'}
+          </button>
+        </div>
+        <Footer />
+      </section>
 
-      {status === 'idle' && <button onClick={handleStart}>Gravar tela</button>}
+      <aside className="panel">
+        <div className="panel__content">
+          <Accordion title="Editar" open={open === 'edit'} onToggle={() => toggle('edit')}>
+            <div className="actions">
+              <button className="btn" disabled>
+                Recortar
+              </button>
+              <button className="btn" disabled>
+                Limpar corte
+              </button>
+            </div>
+          </Accordion>
 
-      {status === 'recording' && (
-        <button onClick={finishRecording}>Parar gravação</button>
-      )}
+          <Accordion
+            title="Formatar"
+            open={open === 'format'}
+            onToggle={() => toggle('format')}
+          >
+            <div className="section-body">
+              <div className="field" aria-disabled>
+                <span>Moldura</span>
+                <Chevron />
+              </div>
+              <div className="segment is-disabled">
+                <span className="segment__item segment__item--active">Fit</span>
+                <span className="segment__item">Fill</span>
+              </div>
+              <div className="field" aria-disabled>
+                <span>
+                  Cor de fundo <span className="muted">– Transparente</span>
+                </span>
+                <span className="swatch swatch--checker" />
+              </div>
+            </div>
+          </Accordion>
 
-      {status === 'recorded' && recordingRef.current && (
-        <Editor
-          blob={recordingRef.current.blob}
-          duration={recordingRef.current.duration}
-          previewUrl={previewUrl}
-          onReset={handleReset}
-        />
-      )}
-    </main>
+          <Accordion
+            title="Exportar"
+            open={open === 'export'}
+            onToggle={() => toggle('export')}
+          >
+            <div className="section-body">
+              <div className="segment is-disabled">
+                <span className="segment__item segment__item--active">GIF</span>
+                <span className="segment__item">MP4</span>
+              </div>
+              <div className="row">
+                <div className="field" aria-disabled>
+                  <span>1x</span>
+                  <Chevron />
+                </div>
+                <div className="field" aria-disabled>
+                  <span>15 FPS</span>
+                  <Chevron />
+                </div>
+                <div className="field field--res" aria-disabled>
+                  <span>Resolução</span>
+                  <Chevron />
+                </div>
+              </div>
+            </div>
+          </Accordion>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function Chevron() {
+  return (
+    <svg width="12" height="6" viewBox="0 0 12 6" fill="none" aria-hidden>
+      <path d="M1 1l5 4 5-4" stroke="#191819" strokeWidth="1.5" />
+    </svg>
   )
 }
 
