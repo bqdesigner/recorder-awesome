@@ -1,4 +1,4 @@
-# Screen Recorder — Plano de Desenvolvimento
+# Recorder Awesome — Plano de Desenvolvimento
 
 > Status: **rascunho v0** — para iterar antes de codar.
 > Referência base: [gifcap.dev](https://gifcap.dev) (simples, gravação→GIF no browser, sem instalar).
@@ -123,6 +123,6 @@ Nota: as fases 1–2 sozinhas ainda não superam o gifcap — validam o pipeline
 - Molduras: SVG próprio simples agora; pack pronto depois ✅
 - Áudio: nunca ✅
 - Hospedagem do app: Vercel ✅
-- Repositório: GitHub privado (só a pasta `screen-recorder`) ✅
+- Repositório: GitHub privado (`recorder-awesome`) ✅
 
 Plano fechado — pronto pra Fase 0.

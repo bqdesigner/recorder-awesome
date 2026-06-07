@@ -1,4 +1,4 @@
-# screen-recorder
+# Recorder Awesome
 
 Grava tela no browser, edita (trim/crop), formata dentro de moldura (celular/notebook/borda) com background, e exporta em **GIF** ou **MP4**.
 
