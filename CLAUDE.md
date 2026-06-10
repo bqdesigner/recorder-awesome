@@ -53,6 +53,7 @@ A parte mais frágil do produto. Separe sempre o que é automatizável do que é
 > Quando o critério de aceite envolve "o arquivo exportado fica correto", o agente escreve o que dá pra automatizar E lista os passos manuais de verificação no corpo do PR. Nunca marca como testado o que só o humano vê.
 
 ## Limites do agente (regras duras)
-1. **NUNCA** mover task para "Concluído". Só o humano faz isso.
-2. **NUNCA** dar merge. **NUNCA** fazer deploy. **NUNCA** tocar em `main` diretamente.
-3. Parar em "Em revisão" com PR aberto e checklist manual preenchido.
+1. **NUNCA** mover task para "Concluído". Só o humano faz isso — mover para "Concluído" é a **autorização** para o merge.
+2. Merge/deploy **só** quando a task já estiver em "Concluído" (gate do item 1). Nesse caso o agente faz **squash merge** do PR na `main` (`gh pr merge --squash --delete-branch`), o que dispara deploy automático na Vercel. **Fora desse gate, NUNCA dar merge nem deploy.**
+3. **NUNCA** commitar direto em `main`. **NUNCA** forçar merge com checks vermelhos, conflito ou branch protegida — nesses casos, parar e reportar.
+4. Sem autorização (task ainda não em "Concluído"), o fluxo termina em "Em revisão" com PR aberto e checklist manual preenchido.

@@ -1,10 +1,16 @@
 ---
-description: Lê o backlog no Notion, escolhe uma task e executa o fluxo até Revisão
+description: Lê o backlog no Notion, executa o fluxo até Revisão e faz o merge após o humano mover a task para Concluído
 ---
 
 # /work-backlog
 
-Você é o executor do fluxo Notion → código → PR. Siga os passos em ordem e **pare em qualquer falha** seguindo a regra de rollback.
+Você é o executor do fluxo Notion → código → PR → merge. Siga os passos em ordem e **pare em qualquer falha** seguindo a regra de rollback.
+
+O fluxo tem dois gatilhos:
+- **Backlog → Em revisão** (Passos 1–6): pegar uma task nova e levá-la até o PR.
+- **Concluído → merge** (Passo 7): quando o humano move uma task para `Concluído`, fazer o merge do PR dela.
+
+No início, decidir qual gatilho atende: se houver task(s) em `Concluído` com PR aberto/não-mergeado, oferecer o Passo 7; caso contrário, seguir o fluxo normal a partir do Passo 1.
 
 ## Pré-condições
 - Ler o `CLAUDE.md` da raiz do repositório antes de começar.
@@ -12,7 +18,7 @@ Você é o executor do fluxo Notion → código → PR. Siga os passos em ordem 
 
 ## Passo 1 — Ler o backlog
 - Buscar no board do Notion apenas tasks com `Status = Backlog`.
-- **REGRA DE IDEMPOTÊNCIA (dura):** filtrar estritamente por `Status = Backlog`. Nunca pegar task que já esteja em "Em andamento", "Em revisão" ou "Concluído". Isso evita pegar a mesma task duas vezes.
+- **REGRA DE IDEMPOTÊNCIA (dura):** filtrar estritamente por `Status = Backlog`. Nunca pegar task que já esteja em "Em andamento", "Em revisão" ou "Concluído" para **codar**. Isso evita pegar a mesma task duas vezes. (Exceção: o Passo 7 toca uma task em "Concluído", mas só para **mergear** o PR dela — nunca para reabrir/codar.)
 - Se houver mais de uma, listar título + resumo e perguntar qual atacar. Se houver só uma, confirmar antes de prosseguir.
 - Se o backlog estiver vazio, avisar e encerrar.
 
@@ -44,14 +50,30 @@ Você é o executor do fluxo Notion → código → PR. Siga os passos em ordem 
 - Mover a task para `Status = Em revisão`.
 - Reportar no chat: branch, PR, e o checklist manual pendente.
 
+## Passo 7 — Merge (após o humano mover para "Concluído")
+**Gate de autorização:** só executar se a task está em `Status = Concluído`. Mover para "Concluído" é ação exclusiva do humano e é o que autoriza o merge. O agente NUNCA move para "Concluído".
+
+- Ler o `PR link` da task. Confirmar com `gh pr view <n>` que o PR está **aberto** e **mergeable** (sem conflito; checks/CI verdes se houver).
+- Se o PR já estiver mergeado ou fechado: não fazer nada, só reportar o estado.
+- Fazer **squash merge** deletando a branch: `gh pr merge <n> --squash --delete-branch`.
+- Atualizar a `main` local: `git checkout main && git pull --ff-only`.
+- O merge na `main` **dispara deploy automático na Vercel**. Reportar no chat: PR mergeado + que o deploy foi disparado.
+- **Não** mexer no Status (a task já está em "Concluído", que é o estado final do humano).
+
+### Rollback do Passo 7 (dura)
+Se o merge falhar (conflito, checks vermelhos, branch protegida, erro de API):
+1. **NÃO** forçar o merge nem commitar direto em `main`.
+2. Reportar claramente o motivo da falha e deixar a decisão para o humano.
+3. A task permanece em "Concluído"; o PR permanece aberto.
+
 ## Regra de rollback em caso de erro (dura)
-Se qualquer passo após o Passo 3 falhar (build quebra, teste não passa, erro de API, etc.):
+Se qualquer passo entre Passo 4 e Passo 6 falhar (build quebra, teste não passa, erro de API, etc.):
 1. **NÃO** deixar a task travada em "Em andamento".
 2. Mover a task de volta para `Status = Backlog`.
 3. Reportar claramente o que falhou e em qual passo.
 4. Não deixar branch órfã sem aviso: se a branch foi criada, mencionar o nome para limpeza manual.
 
 ## Limites (nunca violar)
-- Nunca mover para "Concluído".
-- Nunca dar merge, nunca deploy, nunca commitar direto em `main`.
-- O fluxo do agente termina em "Em revisão". O resto é humano.
+- Nunca **mover** uma task para "Concluído" — isso é do humano e funciona como autorização para o merge.
+- Merge/deploy **só** com a task em "Concluído" (gate do Passo 7). Fora disso, o fluxo termina em "Em revisão".
+- Nunca commitar direto em `main`. Nunca forçar merge com checks vermelhos, conflito ou branch protegida.
