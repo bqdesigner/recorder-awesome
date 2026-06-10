@@ -69,7 +69,9 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [exportState, setExportState] = useState<ExportState>({ kind: 'idle' })
 
   const trimRef = useRef({ start: 0, end: estDuration })
-  const dither = true // dithering sempre ligado (sem controle na UI)
+  // dithering desligado: em screencast o padrão de difusão de erro "anda" entre
+  // frames e gera cintilação (flicker); flat mapping fica estável e nítido.
+  const dither = false
 
   const unlocked = (s: Section) => ORDER.indexOf(s) <= maxUnlocked
   const busy = exportState.kind === 'download'
