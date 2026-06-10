@@ -102,6 +102,44 @@ const DEFAULT_SCENE: Scene = {
   padding: 0,
 }
 
+/**
+ * Índices de frames, distribuídos uniformemente, usados pra amostrar a paleta
+ * global. Inclui sempre o primeiro e o último frame. Se houver menos frames que
+ * o teto, devolve todos.
+ */
+export function sampleFrameIndices(frameCount: number, maxSamples: number): number[] {
+  const fc = Math.max(1, frameCount)
+  const n = Math.max(1, Math.min(fc, maxSamples))
+  if (fc <= n) return Array.from({ length: fc }, (_, i) => i)
+  if (n === 1) return [0]
+  const last = fc - 1
+  const out: number[] = []
+  for (let i = 0; i < n; i++) out.push(Math.round((i * last) / (n - 1)))
+  return out
+}
+
+/** Amostra 1 a cada `stride` pixels do buffer RGBA, retornando um buffer menor. */
+export function subsampleRGBA(rgba: Uint8ClampedArray, stride: number): Uint8ClampedArray {
+  if (stride <= 1) return rgba
+  const pixels = rgba.length / 4
+  const count = Math.ceil(pixels / stride)
+  const out = new Uint8ClampedArray(count * 4)
+  for (let i = 0, o = 0; i < pixels; i += stride, o++) {
+    const s = i * 4
+    const d = o * 4
+    out[d] = rgba[s]
+    out[d + 1] = rgba[s + 1]
+    out[d + 2] = rgba[s + 2]
+    out[d + 3] = rgba[s + 3]
+  }
+  return out
+}
+
+/** Nº de frames amostrados pra montar a paleta global. */
+const MAX_PALETTE_SAMPLES = 24
+/** Stride de pixels ao amostrar cada frame pra paleta (limita memória). */
+const SAMPLE_PX_STRIDE = 8
+
 export async function webmToGif(
   blob: Blob,
   duration: number,
@@ -141,14 +179,20 @@ export async function webmToGif(
   const frameCount = Math.max(1, Math.round((span / speed) * fps))
   const transparent = scene.background === 'transparent'
 
-  for (let i = 0; i < frameCount; i++) {
+  // Renderiza o frame i (seek + compose + downscale) e devolve os pixels finais.
+  // Usado nos dois passes — garante que a paleta é montada sobre os MESMOS
+  // pixels que serão encodados.
+  async function renderFrameData(i: number): Promise<{
+    data: Uint8ClampedArray
+    fw: number
+    fh: number
+  }> {
     await seekTo(video, Math.min(start + (i / fps) * speed, end))
     const composed = compose(canvas, video, src, scene)
 
     // saída na resolução final (reduzida se scale < 1)
     let fw = composed.width
     let fh = composed.height
-    let data: Uint8ClampedArray
     if (scale < 1) {
       fw = Math.max(1, Math.round(composed.width * scale))
       fh = Math.max(1, Math.round(composed.height * scale))
@@ -158,18 +202,41 @@ export async function webmToGif(
       outCtx.imageSmoothingEnabled = true
       outCtx.imageSmoothingQuality = 'high'
       outCtx.drawImage(canvas, 0, 0, composed.width, composed.height, 0, 0, fw, fh)
-      data = outCtx.getImageData(0, 0, fw, fh).data
-    } else {
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-      data = ctx.getImageData(0, 0, fw, fh).data
+      return { data: outCtx.getImageData(0, 0, fw, fh).data, fw, fh }
     }
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+    return { data: ctx.getImageData(0, 0, fw, fh).data, fw, fh }
+  }
 
+  // --- pass 1: paleta global única (acaba o flicker + evita quantizar por frame) ---
+  // Quantizar a paleta a cada frame domina o custo do encode E faz as cores
+  // mudarem de frame a frame (flicker). Aqui montamos UMA paleta a partir de uma
+  // amostra de frames e reusamos em todos.
+  const sampleIdx = sampleFrameIndices(frameCount, MAX_PALETTE_SAMPLES)
+  const chunks: Uint8ClampedArray[] = []
+  let sampleLen = 0
+  for (const i of sampleIdx) {
+    const { data } = await renderFrameData(i)
+    const s = subsampleRGBA(data, SAMPLE_PX_STRIDE)
+    chunks.push(s)
+    sampleLen += s.length
+  }
+  const sampleBuf = new Uint8ClampedArray(sampleLen)
+  for (let off = 0, k = 0; k < chunks.length; k++) {
+    sampleBuf.set(chunks[k], off)
+    off += chunks[k].length
+  }
+  const palette = transparent
+    ? quantize(sampleBuf, 256, { format: 'rgba4444', oneBitAlpha: true })
+    : quantize(sampleBuf, 256)
+
+  // --- pass 2: encode usando a paleta global ---
+  for (let i = 0; i < frameCount; i++) {
+    const { data, fw, fh } = await renderFrameData(i)
     if (transparent) {
-      const palette = quantize(data, 256, { format: 'rgba4444', oneBitAlpha: true })
       const index = applyPalette(data, palette, 'rgba4444')
       gif.writeFrame(index, fw, fh, { palette, delay, transparent: true })
     } else {
-      const palette = quantize(data, 256)
       const index = opts.dither
         ? applyPaletteDithered(data, palette, fw, fh)
         : applyPalette(data, palette)
