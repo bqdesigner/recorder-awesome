@@ -33,6 +33,32 @@ export interface GifOptions {
   onProgress?: (p: number) => void
 }
 
+/**
+ * Amostra 1 a cada `stride` pixels do buffer RGBA, retornando um buffer menor.
+ * A palette é construída sobre esse subconjunto: como `quantize` domina o custo
+ * do encode (~96-99% do tempo por frame), quantizar sobre 1/stride dos pixels é
+ * ~stride× mais rápido e gera palette praticamente idêntica. O applyPalette segue
+ * rodando no frame inteiro, então a saída visual não muda de forma perceptível.
+ */
+export function subsampleRGBA(rgba: Uint8ClampedArray, stride: number): Uint8ClampedArray {
+  if (stride <= 1) return rgba
+  const pixels = rgba.length / 4
+  const count = Math.ceil(pixels / stride)
+  const out = new Uint8ClampedArray(count * 4)
+  for (let i = 0, o = 0; i < pixels; i += stride, o++) {
+    const s = i * 4
+    const d = o * 4
+    out[d] = rgba[s]
+    out[d + 1] = rgba[s + 1]
+    out[d + 2] = rgba[s + 2]
+    out[d + 3] = rgba[s + 3]
+  }
+  return out
+}
+
+/** Fração de pixels amostrada para construir a palette (1 a cada N). */
+const PALETTE_STRIDE = 4
+
 /** Índice da cor mais próxima na palette (busca linear RGB). */
 function nearestIndex(r: number, g: number, b: number, palette: number[][]) {
   let best = 0
@@ -165,11 +191,14 @@ export async function webmToGif(
     }
 
     if (transparent) {
-      const palette = quantize(data, 256, { format: 'rgba4444', oneBitAlpha: true })
+      const palette = quantize(subsampleRGBA(data, PALETTE_STRIDE), 256, {
+        format: 'rgba4444',
+        oneBitAlpha: true,
+      })
       const index = applyPalette(data, palette, 'rgba4444')
       gif.writeFrame(index, fw, fh, { palette, delay, transparent: true })
     } else {
-      const palette = quantize(data, 256)
+      const palette = quantize(subsampleRGBA(data, PALETTE_STRIDE), 256)
       const index = opts.dither
         ? applyPaletteDithered(data, palette, fw, fh)
         : applyPalette(data, palette)
