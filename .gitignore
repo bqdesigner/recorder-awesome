@@ -17,8 +17,19 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
+# secrets / env (NUNCA commitar chaves)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
 # AI harness skills (impeccable) — tooling local, fora do commit
-.claude/
+# Exceção: comandos do projeto (ex: work-backlog) são versionados
+.claude/*
+!.claude/commands/
 .agents/
 .cursor/
 .impeccable/
