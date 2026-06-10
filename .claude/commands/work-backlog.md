@@ -47,6 +47,7 @@ No início, decidir qual gatilho atende: se houver task(s) em `Concluído` com P
   - Link para a task do Notion
   - **Checklist de verificação manual** (o que o humano precisa abrir e conferir)
 - Gravar o link do PR na propriedade `PR link` da task.
+- **Gravar o histórico dentro da task:** adicionar ao corpo da página no Notion uma seção `## 🛠️ Histórico de implementação` com a mesma descrição do PR (PR/branch, causa raiz, o que foi feito, validação, checklist manual e pendências laterais). Isso mantém o histórico dentro da task, não só no GitHub.
 - Mover a task para `Status = Em revisão`.
 - Reportar no chat: branch, PR, e o checklist manual pendente.
 
@@ -58,6 +59,7 @@ No início, decidir qual gatilho atende: se houver task(s) em `Concluído` com P
 - Fazer **squash merge** deletando a branch: `gh pr merge <n> --squash --delete-branch`.
 - Atualizar a `main` local: `git checkout main && git pull --ff-only`.
 - O merge na `main` **dispara deploy automático na Vercel**. Reportar no chat: PR mergeado + que o deploy foi disparado.
+- Atualizar a seção `## 🛠️ Histórico de implementação` no corpo da task com o resultado do merge (commit de squash + deploy disparado).
 - **Não** mexer no Status (a task já está em "Concluído", que é o estado final do humano).
 
 ### Rollback do Passo 7 (dura)
