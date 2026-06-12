@@ -9,6 +9,8 @@ declare module 'gifenc' {
         delay?: number
         transparent?: boolean
         transparentIndex?: number
+        /** Método de disposal do GIF (1 = manter frame anterior). */
+        dispose?: number
       },
     ): void
     finish(): void
