@@ -4,7 +4,9 @@ import {
   subsampleRGBA,
   bayerOffset,
   applyPaletteOrdered,
-  applyPaletteOrderedDelta,
+  diffMask,
+  collectChangedRGBA,
+  applyPaletteOrderedMasked,
   DELTA_THRESHOLD,
 } from './encode'
 
@@ -138,64 +140,105 @@ describe('applyPaletteOrdered', () => {
   })
 })
 
-describe('applyPaletteOrderedDelta', () => {
+/** Shadow (3 bytes/px) preenchido a partir de um buffer RGBA. */
+function shadowFrom(rgba: Uint8ClampedArray): Uint8ClampedArray {
+  const n = rgba.length / 4
+  const out = new Uint8ClampedArray(n * 3)
+  for (let p = 0; p < n; p++) {
+    out[p * 3] = rgba[p * 4]
+    out[p * 3 + 1] = rgba[p * 4 + 1]
+    out[p * 3 + 2] = rgba[p * 4 + 2]
+  }
+  return out
+}
+
+describe('diffMask', () => {
+  it('frame idêntico → nada marcado', () => {
+    const frame = solid(8, 8, 250, 250, 250)
+    const { mask, count } = diffMask(frame, shadowFrom(frame), DELTA_THRESHOLD)
+    expect(count).toBe(0)
+    expect(mask.every((v) => v === 0)).toBe(true)
+  })
+
+  it('ruído dentro do threshold é absorvido (anti-VP9)', () => {
+    const prev = solid(8, 8, 100, 100, 100)
+    const noisy = solid(8, 8, 100 + DELTA_THRESHOLD, 100 - DELTA_THRESHOLD, 100)
+    const { count } = diffMask(noisy, shadowFrom(prev), DELTA_THRESHOLD)
+    expect(count).toBe(0)
+  })
+
+  it('mudança acima do threshold marca o pixel', () => {
+    const prev = solid(2, 1, 0, 0, 0)
+    const next = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255])
+    const { mask, count } = diffMask(next, shadowFrom(prev), DELTA_THRESHOLD)
+    expect(count).toBe(1)
+    expect(Array.from(mask)).toEqual([0, 1])
+  })
+
+  it('não altera o shadow', () => {
+    const prev = solid(4, 1, 10, 10, 10)
+    const shadow = shadowFrom(prev)
+    diffMask(solid(4, 1, 200, 200, 200), shadow, DELTA_THRESHOLD)
+    expect(shadow[0]).toBe(10)
+  })
+})
+
+describe('collectChangedRGBA', () => {
+  it('junta só os pixels marcados', () => {
+    const rgba = new Uint8ClampedArray([1, 1, 1, 255, 2, 2, 2, 255, 3, 3, 3, 255])
+    const mask = new Uint8Array([1, 0, 1])
+    const out = collectChangedRGBA(rgba, mask, 2, 1)
+    expect(Array.from(out)).toEqual([1, 1, 1, 255, 3, 3, 3, 255])
+  })
+
+  it('stride amostra 1 a cada N pixels marcados', () => {
+    const rgba = ramp(8)
+    const mask = new Uint8Array(8).fill(1)
+    const out = collectChangedRGBA(rgba, mask, 8, 4)
+    expect(out.length).toBe(2 * 4) // pixels 0 e 4
+    expect(out[4]).toBe(4)
+  })
+})
+
+describe('applyPaletteOrderedMasked', () => {
   const bw = [
     [0, 0, 0],
     [255, 255, 255],
   ]
   const TRANS = 2 // índice transparente (fora da paleta bw)
 
-  /** Shadow (3 bytes/px) preenchido a partir de um buffer RGBA. */
-  function shadowFrom(rgba: Uint8ClampedArray): Uint8ClampedArray {
-    const n = rgba.length / 4
-    const out = new Uint8ClampedArray(n * 3)
-    for (let p = 0; p < n; p++) {
-      out[p * 3] = rgba[p * 4]
-      out[p * 3 + 1] = rgba[p * 4 + 1]
-      out[p * 3 + 2] = rgba[p * 4 + 2]
-    }
-    return out
-  }
-
-  it('pixel inalterado vira transparentIndex e o shadow não muda', () => {
+  it('pixel fora da mask vira transparentIndex e o shadow não muda', () => {
     const frame = solid(8, 8, 250, 250, 250)
-    const shadow = shadowFrom(frame)
-    const idx = applyPaletteOrderedDelta(frame, bw, 8, 8, shadow, DELTA_THRESHOLD, TRANS)
+    const shadow = shadowFrom(solid(8, 8, 9, 9, 9))
+    const mask = new Uint8Array(64) // nada marcado
+    const idx = applyPaletteOrderedMasked(frame, bw, 8, 8, mask, TRANS, shadow)
     expect(Array.from(new Set(idx))).toEqual([TRANS])
-    expect(shadow[0]).toBe(250)
+    expect(shadow[0]).toBe(9)
   })
 
-  it('ruído dentro do threshold é absorvido (anti-VP9)', () => {
-    const prev = solid(8, 8, 100, 100, 100)
-    const shadow = shadowFrom(prev)
-    const noisy = solid(8, 8, 100 + DELTA_THRESHOLD, 100 - DELTA_THRESHOLD, 100)
-    const idx = applyPaletteOrderedDelta(noisy, bw, 8, 8, shadow, DELTA_THRESHOLD, TRANS)
-    expect(Array.from(new Set(idx))).toEqual([TRANS])
-    expect(shadow[0]).toBe(100) // shadow preserva a última escrita real
-  })
-
-  it('mudança acima do threshold é escrita e atualiza o shadow', () => {
-    const prev = solid(8, 8, 0, 0, 0)
-    const shadow = shadowFrom(prev)
+  it('pixel na mask é mapeado e atualiza o shadow', () => {
     const next = solid(8, 8, 255, 255, 255)
-    const idx = applyPaletteOrderedDelta(next, bw, 8, 8, shadow, DELTA_THRESHOLD, TRANS)
-    expect(Array.from(new Set(idx))).toEqual([1]) // tudo mapeado pro branco
+    const shadow = shadowFrom(solid(8, 8, 0, 0, 0))
+    const mask = new Uint8Array(64).fill(1)
+    const idx = applyPaletteOrderedMasked(next, bw, 8, 8, mask, TRANS, shadow)
+    expect(Array.from(new Set(idx))).toEqual([1])
     expect(shadow[0]).toBe(255)
   })
 
-  it('mistura: só os pixels alterados são re-escritos', () => {
-    const prev = solid(2, 1, 0, 0, 0) // 2 pixels pretos
-    const shadow = shadowFrom(prev)
-    const next = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]) // 2º vira branco
-    const idx = applyPaletteOrderedDelta(next, bw, 2, 1, shadow, DELTA_THRESHOLD, TRANS)
+  it('mistura: só os marcados são re-escritos', () => {
+    const next = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255])
+    const shadow = shadowFrom(solid(2, 1, 0, 0, 0))
+    const mask = new Uint8Array([0, 1])
+    const idx = applyPaletteOrderedMasked(next, bw, 2, 1, mask, TRANS, shadow)
     expect(idx[0]).toBe(TRANS)
     expect(idx[1]).toBe(1)
   })
 
   it('é determinístico para o mesmo estado', () => {
     const frame = solid(8, 8, 200, 60, 60)
-    const a = applyPaletteOrderedDelta(frame, bw, 8, 8, shadowFrom(solid(8, 8, 0, 0, 0)), DELTA_THRESHOLD, TRANS)
-    const b = applyPaletteOrderedDelta(frame, bw, 8, 8, shadowFrom(solid(8, 8, 0, 0, 0)), DELTA_THRESHOLD, TRANS)
+    const mask = new Uint8Array(64).fill(1)
+    const a = applyPaletteOrderedMasked(frame, bw, 8, 8, mask, TRANS, shadowFrom(solid(8, 8, 0, 0, 0)))
+    const b = applyPaletteOrderedMasked(frame, bw, 8, 8, mask, TRANS, shadowFrom(solid(8, 8, 0, 0, 0)))
     expect(Array.from(a)).toEqual(Array.from(b))
   })
 })

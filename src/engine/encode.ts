@@ -168,39 +168,91 @@ export function applyPaletteOrdered(
 export const DELTA_THRESHOLD = 8
 
 /**
- * Mapeia RGBA → índices com dithering ordenado, escrevendo só o que mudou
- * (delta encoding, técnica do gifcap): pixel que variou ≤ `threshold` por canal
- * desde a última escrita vira `transparentIndex` — com disposal 1 o GIF mantém
- * o pixel anterior na tela. Estático nunca re-dithera → zero flicker e arquivo
- * menor. `shadow` (3 bytes/pixel) guarda o RGB cru da última escrita e é
- * atualizado in-place.
+ * Marca os pixels que mudaram além de `threshold` por canal desde a última
+ * escrita (delta encoding, técnica do gifcap). Não altera o shadow.
  */
-export function applyPaletteOrderedDelta(
+export function diffMask(
+  rgba: Uint8ClampedArray,
+  shadow: Uint8ClampedArray,
+  threshold: number,
+): { mask: Uint8Array; count: number } {
+  const n = rgba.length / 4
+  const mask = new Uint8Array(n)
+  let count = 0
+  for (let p = 0; p < n; p++) {
+    const i = p * 4
+    const s = p * 3
+    const dr = rgba[i] - shadow[s]
+    const dg = rgba[i + 1] - shadow[s + 1]
+    const db = rgba[i + 2] - shadow[s + 2]
+    if (
+      dr > threshold || dr < -threshold ||
+      dg > threshold || dg < -threshold ||
+      db > threshold || db < -threshold
+    ) {
+      mask[p] = 1
+      count++
+    }
+  }
+  return { mask, count }
+}
+
+/**
+ * Junta num buffer compacto os pixels marcados na mask (1 a cada `stride`),
+ * pra alimentar o quantize da paleta local do frame.
+ */
+export function collectChangedRGBA(
+  rgba: Uint8ClampedArray,
+  mask: Uint8Array,
+  count: number,
+  stride: number,
+): Uint8ClampedArray {
+  const st = Math.max(1, stride)
+  const out = new Uint8ClampedArray(Math.ceil(count / st) * 4)
+  let seen = 0
+  let o = 0
+  for (let p = 0; p < mask.length; p++) {
+    if (!mask[p]) continue
+    if (seen % st === 0) {
+      const i = p * 4
+      out[o] = rgba[i]
+      out[o + 1] = rgba[i + 1]
+      out[o + 2] = rgba[i + 2]
+      out[o + 3] = 255
+      o += 4
+    }
+    seen++
+  }
+  return out.subarray(0, o) as Uint8ClampedArray
+}
+
+/**
+ * Mapeia RGBA → índices usando a mask do delta: pixel inalterado vira
+ * `transparentIndex` (com disposal 1 o GIF mantém o anterior na tela); pixel
+ * mudado é mapeado com dithering ordenado e atualiza o `shadow` (3 bytes/px,
+ * RGB cru da última escrita) in-place. Estático nunca re-dithera → sem flicker.
+ */
+export function applyPaletteOrderedMasked(
   rgba: Uint8ClampedArray,
   palette: number[][],
   w: number,
   h: number,
-  shadow: Uint8ClampedArray,
-  threshold: number,
+  mask: Uint8Array,
   transparentIndex: number,
+  shadow: Uint8ClampedArray,
 ): Uint8Array {
   const index = new Uint8Array(w * h)
   const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const p = y * w + x
-      const i = p * 4
-      const s = p * 3
-      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
-      const dr = r0 - shadow[s], dg = g0 - shadow[s + 1], db = b0 - shadow[s + 2]
-      if (
-        dr <= threshold && dr >= -threshold &&
-        dg <= threshold && dg >= -threshold &&
-        db <= threshold && db >= -threshold
-      ) {
+      if (!mask[p]) {
         index[p] = transparentIndex
         continue
       }
+      const i = p * 4
+      const s = p * 3
+      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
       shadow[s] = r0
       shadow[s + 1] = g0
       shadow[s + 2] = b0
@@ -331,70 +383,92 @@ export async function webmToGif(
     return { data: ctx.getImageData(0, 0, fw, fh).data, fw, fh }
   }
 
-  // --- pass 1: paleta global única (acaba o flicker + evita quantizar por frame) ---
-  // Quantizar a paleta a cada frame domina o custo do encode E faz as cores
-  // mudarem de frame a frame (flicker). Aqui montamos UMA paleta a partir de uma
-  // amostra de frames e reusamos em todos.
-  const sampleIdx = sampleFrameIndices(frameCount, MAX_PALETTE_SAMPLES)
-  const chunks: Uint8ClampedArray[] = []
-  let sampleLen = 0
-  for (const i of sampleIdx) {
-    const { data } = await renderFrameData(i)
-    const s = subsampleRGBA(data, SAMPLE_PX_STRIDE)
-    chunks.push(s)
-    sampleLen += s.length
-  }
-  const sampleBuf = new Uint8ClampedArray(sampleLen)
-  for (let off = 0, k = 0; k < chunks.length; k++) {
-    sampleBuf.set(chunks[k], off)
-    off += chunks[k].length
-  }
-  // Delta encoding (estilo gifcap) só no caminho ordered + fundo opaco:
-  // reserva 1 slot da paleta pro índice transparente dos pixels inalterados.
+  // Delta + paleta local por frame (algoritmo do gifcap) no caminho ordered +
+  // fundo opaco. Uma paleta global de 256 cores não cobre uma UI inteira (ex:
+  // tema dark vira ~12 tons de cinza com manchas); a paleta local dá 255 cores
+  // só pros pixels que mudaram, e o delta garante que o estático fica intacto
+  // (sem flicker) e que o quantize roda só sobre a região alterada (rápido).
   const useDelta = !transparent && opts.dither === 'ordered'
-  const palette = transparent
-    ? quantize(sampleBuf, 256, { format: 'rgba4444', oneBitAlpha: true })
-    : quantize(sampleBuf, useDelta ? 255 : 256)
-  let transparentIndex = -1
-  if (useDelta) {
-    palette.push([0, 0, 0]) // cor irrelevante: o slot só marca "manter pixel"
-    transparentIndex = palette.length - 1
+
+  // --- paleta global única: só nos caminhos sem delta ---
+  let palette: number[][] | null = null
+  if (!useDelta) {
+    const sampleIdx = sampleFrameIndices(frameCount, MAX_PALETTE_SAMPLES)
+    const chunks: Uint8ClampedArray[] = []
+    let sampleLen = 0
+    for (const i of sampleIdx) {
+      const { data } = await renderFrameData(i)
+      const s = subsampleRGBA(data, SAMPLE_PX_STRIDE)
+      chunks.push(s)
+      sampleLen += s.length
+    }
+    const sampleBuf = new Uint8ClampedArray(sampleLen)
+    for (let off = 0, k = 0; k < chunks.length; k++) {
+      sampleBuf.set(chunks[k], off)
+      off += chunks[k].length
+    }
+    palette = transparent
+      ? quantize(sampleBuf, 256, { format: 'rgba4444', oneBitAlpha: true })
+      : quantize(sampleBuf, 256)
   }
 
-  // RGB cru da última escrita por pixel (delta); null até o primeiro frame.
+  // Estado do delta: RGB cru da última escrita por pixel + última paleta local
+  // (reusada quando um frame não muda nada).
   let shadow: Uint8ClampedArray | null = null
+  let lastPalette: number[][] = []
+  let lastTransparentIndex = -1
 
-  // --- pass 2: encode usando a paleta global ---
   for (let i = 0; i < frameCount; i++) {
     const { data, fw, fh } = await renderFrameData(i)
     if (transparent) {
-      const index = applyPalette(data, palette, 'rgba4444')
-      gif.writeFrame(index, fw, fh, { palette, delay, transparent: true })
+      const index = applyPalette(data, palette!, 'rgba4444')
+      gif.writeFrame(index, fw, fh, { palette: palette!, delay, transparent: true })
     } else if (useDelta) {
       if (!shadow) {
-        // primeiro frame: escreve inteiro e inicializa o shadow
+        // primeiro frame: paleta local do frame inteiro, escreve tudo
         shadow = new Uint8ClampedArray(fw * fh * 3)
         for (let p = 0; p < fw * fh; p++) {
           shadow[p * 3] = data[p * 4]
           shadow[p * 3 + 1] = data[p * 4 + 1]
           shadow[p * 3 + 2] = data[p * 4 + 2]
         }
-        const index = applyPaletteOrdered(data, palette, fw, fh)
-        gif.writeFrame(index, fw, fh, { palette, delay, dispose: 1 })
+        const pal = quantize(subsampleRGBA(data, 2), 255)
+        pal.push([0, 0, 0]) // slot transparente (cor irrelevante)
+        const index = applyPaletteOrdered(data, pal, fw, fh)
+        gif.writeFrame(index, fw, fh, { palette: pal, delay, dispose: 1 })
+        lastPalette = pal
+        lastTransparentIndex = pal.length - 1
       } else {
-        const index = applyPaletteOrderedDelta(
-          data, palette, fw, fh, shadow, DELTA_THRESHOLD, transparentIndex,
-        )
-        gif.writeFrame(index, fw, fh, {
-          palette, delay, transparent: true, transparentIndex, dispose: 1,
-        })
+        const { mask, count } = diffMask(data, shadow, DELTA_THRESHOLD)
+        if (count === 0) {
+          // nada mudou: frame inteiro transparente (mantém a tela anterior)
+          const index = new Uint8Array(fw * fh).fill(lastTransparentIndex)
+          gif.writeFrame(index, fw, fh, {
+            palette: lastPalette, delay,
+            transparent: true, transparentIndex: lastTransparentIndex, dispose: 1,
+          })
+        } else {
+          // paleta local só dos pixels alterados (255 cores pro delta)
+          const stride = count > 250_000 ? 4 : 1
+          const pal = quantize(collectChangedRGBA(data, mask, count, stride), 255)
+          pal.push([0, 0, 0])
+          const transparentIndex = pal.length - 1
+          const index = applyPaletteOrderedMasked(
+            data, pal, fw, fh, mask, transparentIndex, shadow,
+          )
+          gif.writeFrame(index, fw, fh, {
+            palette: pal, delay, transparent: true, transparentIndex, dispose: 1,
+          })
+          lastPalette = pal
+          lastTransparentIndex = transparentIndex
+        }
       }
     } else {
       const index =
         opts.dither === 'floyd'
-          ? applyPaletteDithered(data, palette, fw, fh)
-          : applyPalette(data, palette)
-      gif.writeFrame(index, fw, fh, { palette, delay })
+          ? applyPaletteDithered(data, palette!, fw, fh)
+          : applyPalette(data, palette!)
+      gif.writeFrame(index, fw, fh, { palette: palette!, delay })
     }
     opts.onProgress?.((i + 1) / frameCount)
   }
