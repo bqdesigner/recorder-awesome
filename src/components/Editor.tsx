@@ -80,9 +80,9 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const frame = frameId === 'none' ? null : FRAMES.find((f) => f.id === frameId) ?? null
   const scene: Scene = {
     frame,
-    // sem respiro, o fundo (visível nos vãos de devices/cantos) fica branco
-    // pra não se misturar com a moldura escura sobre a página branca
-    background: addRespiro ? (bgTransparent ? 'transparent' : background) : '#ffffff',
+    // sem respiro o fundo é transparente (vãos de devices/cantos não se misturam
+    // com a moldura escura); no export MP4 vira branco, pois MP4 não tem alpha.
+    background: addRespiro ? (bgTransparent ? 'transparent' : background) : 'transparent',
     fit,
     padding: addRespiro ? 48 : 0,
     screenFill,
@@ -273,11 +273,16 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
 
   // --- exportação (baixar / copiar) ---
   async function runExport() {
+    // MP4 não suporta transparência: fundo transparente vira branco no vídeo.
+    const exportScene: Scene =
+      format === 'mp4' && scene.background === 'transparent'
+        ? { ...scene, background: '#ffffff' }
+        : scene
     const opts = {
       start: trimStart,
       end: trimEnd,
       crop: crop ?? undefined,
-      scene,
+      scene: exportScene,
       speed,
     }
     const onProgress = (p: number) =>
@@ -329,7 +334,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
       <section className="recorder">
         <div
           className={`stage${cropMode || busy ? '' : ' clickable'}${
-            bgTransparent ? ' checker' : ''
+            scene.background === 'transparent' ? ' checker' : ''
           }`}
           onClick={() => {
             if (!cropMode && !busy) setPlaying((p) => !p)
@@ -479,8 +484,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                   {bgTransparent && <span className="muted">– Transparente</span>}
                 </span>
                 <ColorPicker
-                  value={addRespiro ? background : '#ffffff'}
-                  transparent={addRespiro ? bgTransparent : false}
+                  value={background}
+                  transparent={addRespiro ? bgTransparent : true}
                   disabled={!addRespiro}
                   onChange={(h) => {
                     setBackground(h)
