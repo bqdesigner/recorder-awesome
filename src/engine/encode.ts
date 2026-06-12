@@ -27,8 +27,16 @@ export interface GifOptions {
   speed?: number
   /** Fator de escala da saída (0..1). 0.5 = metade da resolução. Default 1. */
   scale?: number
-  /** Dithering Floyd–Steinberg: reduz banding em gradientes. Default false. */
-  dither?: boolean
+  /**
+   * Dithering: reduz banding em gradientes.
+   * - `'ordered'`: matriz Bayer fixa — determinística, estável entre frames
+   *   (sem flicker). Recomendado para screencast.
+   * - `'floyd'`: Floyd–Steinberg — melhor em gradientes, mas o padrão "anda"
+   *   entre frames e pode cintilar em vídeo.
+   * - `false`: mapeamento direto (mais nítido em texto, mas com banding).
+   * Default false.
+   */
+  dither?: 'ordered' | 'floyd' | false
   /** Progresso 0..1. */
   onProgress?: (p: number) => void
 }
@@ -95,6 +103,64 @@ function applyPaletteDithered(
   return index
 }
 
+/**
+ * Matriz Bayer 8×8 (valores 0..63), em ordem row-major. Usada no dithering
+ * ordenado: o limiar depende só da posição (x,y), nunca do conteúdo dos
+ * frames vizinhos. Logo o mesmo pixel ditera sempre igual → estável no tempo
+ * (sem flicker), diferente do Floyd–Steinberg cujo padrão "anda".
+ */
+const BAYER_8 = [
+  0, 32, 8, 40, 2, 34, 10, 42,
+  48, 16, 56, 24, 50, 18, 58, 26,
+  12, 44, 4, 36, 14, 46, 6, 38,
+  60, 28, 52, 20, 62, 30, 54, 22,
+  3, 35, 11, 43, 1, 33, 9, 41,
+  51, 19, 59, 27, 49, 17, 57, 25,
+  15, 47, 7, 39, 13, 45, 5, 37,
+  63, 31, 55, 23, 61, 29, 53, 21,
+]
+
+/** Amplitude do deslocamento de dither (em níveis 0..255) aplicado por pixel. */
+const ORDERED_DITHER_STRENGTH = 48
+
+/**
+ * Deslocamento de dither ordenado para a posição (x,y), em [-0.5, 0.5).
+ * Periódico em 8 nos dois eixos. Determinístico: depende só da posição.
+ */
+export function bayerOffset(x: number, y: number): number {
+  return BAYER_8[(y & 7) * 8 + (x & 7)] / 64 - 0.5
+}
+
+/**
+ * Mapeia RGBA → índices de palette com dithering ordenado (Bayer 8×8).
+ * Soma um limiar por posição antes de buscar a cor mais próxima — quebra o
+ * banding como o Floyd–Steinberg, mas sem variar entre frames.
+ */
+export function applyPaletteOrdered(
+  rgba: Uint8ClampedArray,
+  palette: number[][],
+  w: number,
+  h: number,
+): Uint8Array {
+  const index = new Uint8Array(w * h)
+  const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
+      const i = (y * w + x) * 4
+      let r = rgba[i] + off, g = rgba[i + 1] + off, b = rgba[i + 2] + off
+      r = r < 0 ? 0 : r > 255 ? 255 : r
+      g = g < 0 ? 0 : g > 255 ? 255 : g
+      b = b < 0 ? 0 : b > 255 ? 255 : b
+      const key = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+      let idx = cache[key]
+      if (idx === -1) idx = cache[key] = nearestIndex(r, g, b, palette)
+      index[y * w + x] = idx
+    }
+  }
+  return index
+}
+
 const DEFAULT_SCENE: Scene = {
   frame: null,
   background: '#000',
@@ -136,9 +202,9 @@ export function subsampleRGBA(rgba: Uint8ClampedArray, stride: number): Uint8Cla
 }
 
 /** Nº de frames amostrados pra montar a paleta global. */
-const MAX_PALETTE_SAMPLES = 24
+const MAX_PALETTE_SAMPLES = 32
 /** Stride de pixels ao amostrar cada frame pra paleta (limita memória). */
-const SAMPLE_PX_STRIDE = 8
+const SAMPLE_PX_STRIDE = 4
 
 export async function webmToGif(
   blob: Blob,
@@ -237,9 +303,12 @@ export async function webmToGif(
       const index = applyPalette(data, palette, 'rgba4444')
       gif.writeFrame(index, fw, fh, { palette, delay, transparent: true })
     } else {
-      const index = opts.dither
-        ? applyPaletteDithered(data, palette, fw, fh)
-        : applyPalette(data, palette)
+      const index =
+        opts.dither === 'ordered'
+          ? applyPaletteOrdered(data, palette, fw, fh)
+          : opts.dither === 'floyd'
+            ? applyPaletteDithered(data, palette, fw, fh)
+            : applyPalette(data, palette)
       gif.writeFrame(index, fw, fh, { palette, delay })
     }
     opts.onProgress?.((i + 1) / frameCount)

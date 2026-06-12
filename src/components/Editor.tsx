@@ -70,9 +70,10 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [exportState, setExportState] = useState<ExportState>({ kind: 'idle' })
 
   const trimRef = useRef({ start: 0, end: estDuration })
-  // dithering desligado: em screencast o padrão de difusão de erro "anda" entre
-  // frames e gera cintilação (flicker); flat mapping fica estável e nítido.
-  const dither = false
+  // dithering ordenado (Bayer): quebra o banding em gradientes (qualidade
+  // próxima do gifcap), mas com limiar fixo por posição → determinístico e
+  // estável entre frames, sem o flicker do Floyd–Steinberg.
+  const dither = 'ordered' as const
 
   const unlocked = (s: Section) => ORDER.indexOf(s) <= maxUnlocked
   const busy = exportState.kind === 'download'

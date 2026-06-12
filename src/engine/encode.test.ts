@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { sampleFrameIndices, subsampleRGBA } from './encode'
+import {
+  sampleFrameIndices,
+  subsampleRGBA,
+  bayerOffset,
+  applyPaletteOrdered,
+} from './encode'
 
 describe('sampleFrameIndices', () => {
   it('devolve todos os frames quando há menos que o teto', () => {
@@ -59,5 +64,74 @@ describe('subsampleRGBA', () => {
     const data = new Uint8ClampedArray([10, 20, 30, 40, 99, 99, 99, 99, 50, 60, 70, 80])
     const out = subsampleRGBA(data, 2)
     expect(Array.from(out)).toEqual([10, 20, 30, 40, 50, 60, 70, 80])
+  })
+})
+
+describe('bayerOffset', () => {
+  it('é determinístico: mesma posição → mesmo valor', () => {
+    expect(bayerOffset(3, 5)).toBe(bayerOffset(3, 5))
+  })
+
+  it('fica no intervalo [-0.5, 0.5)', () => {
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const v = bayerOffset(x, y)
+        expect(v).toBeGreaterThanOrEqual(-0.5)
+        expect(v).toBeLessThan(0.5)
+      }
+    }
+  })
+
+  it('é periódico em 8 nos dois eixos', () => {
+    expect(bayerOffset(2, 6)).toBe(bayerOffset(2 + 8, 6))
+    expect(bayerOffset(2, 6)).toBe(bayerOffset(2, 6 + 16))
+    expect(bayerOffset(0, 0)).toBe(bayerOffset(8, 8))
+  })
+
+  it('cobre o canto baixo (0) e o canto alto (63) da matriz', () => {
+    expect(bayerOffset(0, 0)).toBeCloseTo(-0.5) // célula 0 (canto sup. esq.)
+    expect(bayerOffset(0, 7)).toBeCloseTo(63 / 64 - 0.5) // célula 63 (início da última linha)
+  })
+})
+
+/** Buffer RGBA de w*h pixels todos com a mesma cor (r,g,b), alpha 255. */
+function solid(w: number, h: number, r: number, g: number, b: number): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(w * h * 4)
+  for (let i = 0; i < w * h; i++) {
+    out[i * 4] = r
+    out[i * 4 + 1] = g
+    out[i * 4 + 2] = b
+    out[i * 4 + 3] = 255
+  }
+  return out
+}
+
+describe('applyPaletteOrdered', () => {
+  const bw = [
+    [0, 0, 0],
+    [255, 255, 255],
+  ]
+
+  it('estável no tempo: mesmo frame → índices idênticos (sem flicker)', () => {
+    const frame = solid(8, 8, 130, 130, 130)
+    const a = applyPaletteOrdered(frame, bw, 8, 8)
+    const b = applyPaletteOrdered(frame, bw, 8, 8)
+    expect(Array.from(a)).toEqual(Array.from(b))
+  })
+
+  it('faz dithering: região cinza chapada usa as duas cores da paleta', () => {
+    // cinza ~127 fica na fronteira preto/branco; o limiar Bayer empurra
+    // alguns pixels pra cada lado → mistura (quebra o banding).
+    const idx = applyPaletteOrdered(solid(8, 8, 127, 127, 127), bw, 8, 8)
+    const uniq = new Set(idx)
+    expect(uniq.has(0)).toBe(true)
+    expect(uniq.has(1)).toBe(true)
+  })
+
+  it('cor exata da paleta não vira ruído visível além do dither', () => {
+    // preto puro: o offset Bayer (máx ~+22) mantém quase tudo no preto.
+    const idx = applyPaletteOrdered(solid(8, 8, 0, 0, 0), bw, 8, 8)
+    const blacks = Array.from(idx).filter((v) => v === 0).length
+    expect(blacks).toBe(64)
   })
 })
