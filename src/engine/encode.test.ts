@@ -4,6 +4,8 @@ import {
   subsampleRGBA,
   bayerOffset,
   applyPaletteOrdered,
+  applyPaletteOrderedDelta,
+  DELTA_THRESHOLD,
 } from './encode'
 
 describe('sampleFrameIndices', () => {
@@ -133,5 +135,67 @@ describe('applyPaletteOrdered', () => {
     const idx = applyPaletteOrdered(solid(8, 8, 0, 0, 0), bw, 8, 8)
     const blacks = Array.from(idx).filter((v) => v === 0).length
     expect(blacks).toBe(64)
+  })
+})
+
+describe('applyPaletteOrderedDelta', () => {
+  const bw = [
+    [0, 0, 0],
+    [255, 255, 255],
+  ]
+  const TRANS = 2 // índice transparente (fora da paleta bw)
+
+  /** Shadow (3 bytes/px) preenchido a partir de um buffer RGBA. */
+  function shadowFrom(rgba: Uint8ClampedArray): Uint8ClampedArray {
+    const n = rgba.length / 4
+    const out = new Uint8ClampedArray(n * 3)
+    for (let p = 0; p < n; p++) {
+      out[p * 3] = rgba[p * 4]
+      out[p * 3 + 1] = rgba[p * 4 + 1]
+      out[p * 3 + 2] = rgba[p * 4 + 2]
+    }
+    return out
+  }
+
+  it('pixel inalterado vira transparentIndex e o shadow não muda', () => {
+    const frame = solid(8, 8, 250, 250, 250)
+    const shadow = shadowFrom(frame)
+    const idx = applyPaletteOrderedDelta(frame, bw, 8, 8, shadow, DELTA_THRESHOLD, TRANS)
+    expect(Array.from(new Set(idx))).toEqual([TRANS])
+    expect(shadow[0]).toBe(250)
+  })
+
+  it('ruído dentro do threshold é absorvido (anti-VP9)', () => {
+    const prev = solid(8, 8, 100, 100, 100)
+    const shadow = shadowFrom(prev)
+    const noisy = solid(8, 8, 100 + DELTA_THRESHOLD, 100 - DELTA_THRESHOLD, 100)
+    const idx = applyPaletteOrderedDelta(noisy, bw, 8, 8, shadow, DELTA_THRESHOLD, TRANS)
+    expect(Array.from(new Set(idx))).toEqual([TRANS])
+    expect(shadow[0]).toBe(100) // shadow preserva a última escrita real
+  })
+
+  it('mudança acima do threshold é escrita e atualiza o shadow', () => {
+    const prev = solid(8, 8, 0, 0, 0)
+    const shadow = shadowFrom(prev)
+    const next = solid(8, 8, 255, 255, 255)
+    const idx = applyPaletteOrderedDelta(next, bw, 8, 8, shadow, DELTA_THRESHOLD, TRANS)
+    expect(Array.from(new Set(idx))).toEqual([1]) // tudo mapeado pro branco
+    expect(shadow[0]).toBe(255)
+  })
+
+  it('mistura: só os pixels alterados são re-escritos', () => {
+    const prev = solid(2, 1, 0, 0, 0) // 2 pixels pretos
+    const shadow = shadowFrom(prev)
+    const next = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]) // 2º vira branco
+    const idx = applyPaletteOrderedDelta(next, bw, 2, 1, shadow, DELTA_THRESHOLD, TRANS)
+    expect(idx[0]).toBe(TRANS)
+    expect(idx[1]).toBe(1)
+  })
+
+  it('é determinístico para o mesmo estado', () => {
+    const frame = solid(8, 8, 200, 60, 60)
+    const a = applyPaletteOrderedDelta(frame, bw, 8, 8, shadowFrom(solid(8, 8, 0, 0, 0)), DELTA_THRESHOLD, TRANS)
+    const b = applyPaletteOrderedDelta(frame, bw, 8, 8, shadowFrom(solid(8, 8, 0, 0, 0)), DELTA_THRESHOLD, TRANS)
+    expect(Array.from(a)).toEqual(Array.from(b))
   })
 })

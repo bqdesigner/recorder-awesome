@@ -121,7 +121,7 @@ const BAYER_8 = [
 ]
 
 /** Amplitude do deslocamento de dither (em níveis 0..255) aplicado por pixel. */
-const ORDERED_DITHER_STRENGTH = 48
+const ORDERED_DITHER_STRENGTH = 32
 
 /**
  * Deslocamento de dither ordenado para a posição (x,y), em [-0.5, 0.5).
@@ -156,6 +156,63 @@ export function applyPaletteOrdered(
       let idx = cache[key]
       if (idx === -1) idx = cache[key] = nearestIndex(r, g, b, palette)
       index[y * w + x] = idx
+    }
+  }
+  return index
+}
+
+/**
+ * Limiar por canal pra considerar um pixel "mudado" entre frames. Absorve o
+ * ruído do VP9 (MediaRecorder), que perturba pixels estáticos por compressão.
+ */
+export const DELTA_THRESHOLD = 8
+
+/**
+ * Mapeia RGBA → índices com dithering ordenado, escrevendo só o que mudou
+ * (delta encoding, técnica do gifcap): pixel que variou ≤ `threshold` por canal
+ * desde a última escrita vira `transparentIndex` — com disposal 1 o GIF mantém
+ * o pixel anterior na tela. Estático nunca re-dithera → zero flicker e arquivo
+ * menor. `shadow` (3 bytes/pixel) guarda o RGB cru da última escrita e é
+ * atualizado in-place.
+ */
+export function applyPaletteOrderedDelta(
+  rgba: Uint8ClampedArray,
+  palette: number[][],
+  w: number,
+  h: number,
+  shadow: Uint8ClampedArray,
+  threshold: number,
+  transparentIndex: number,
+): Uint8Array {
+  const index = new Uint8Array(w * h)
+  const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x
+      const i = p * 4
+      const s = p * 3
+      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
+      const dr = r0 - shadow[s], dg = g0 - shadow[s + 1], db = b0 - shadow[s + 2]
+      if (
+        dr <= threshold && dr >= -threshold &&
+        dg <= threshold && dg >= -threshold &&
+        db <= threshold && db >= -threshold
+      ) {
+        index[p] = transparentIndex
+        continue
+      }
+      shadow[s] = r0
+      shadow[s + 1] = g0
+      shadow[s + 2] = b0
+      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
+      let r = r0 + off, g = g0 + off, b = b0 + off
+      r = r < 0 ? 0 : r > 255 ? 255 : r
+      g = g < 0 ? 0 : g > 255 ? 255 : g
+      b = b < 0 ? 0 : b > 255 ? 255 : b
+      const key = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+      let idx = cache[key]
+      if (idx === -1) idx = cache[key] = nearestIndex(r, g, b, palette)
+      index[p] = idx
     }
   }
   return index
@@ -292,9 +349,20 @@ export async function webmToGif(
     sampleBuf.set(chunks[k], off)
     off += chunks[k].length
   }
+  // Delta encoding (estilo gifcap) só no caminho ordered + fundo opaco:
+  // reserva 1 slot da paleta pro índice transparente dos pixels inalterados.
+  const useDelta = !transparent && opts.dither === 'ordered'
   const palette = transparent
     ? quantize(sampleBuf, 256, { format: 'rgba4444', oneBitAlpha: true })
-    : quantize(sampleBuf, 256)
+    : quantize(sampleBuf, useDelta ? 255 : 256)
+  let transparentIndex = -1
+  if (useDelta) {
+    palette.push([0, 0, 0]) // cor irrelevante: o slot só marca "manter pixel"
+    transparentIndex = palette.length - 1
+  }
+
+  // RGB cru da última escrita por pixel (delta); null até o primeiro frame.
+  let shadow: Uint8ClampedArray | null = null
 
   // --- pass 2: encode usando a paleta global ---
   for (let i = 0; i < frameCount; i++) {
@@ -302,13 +370,30 @@ export async function webmToGif(
     if (transparent) {
       const index = applyPalette(data, palette, 'rgba4444')
       gif.writeFrame(index, fw, fh, { palette, delay, transparent: true })
+    } else if (useDelta) {
+      if (!shadow) {
+        // primeiro frame: escreve inteiro e inicializa o shadow
+        shadow = new Uint8ClampedArray(fw * fh * 3)
+        for (let p = 0; p < fw * fh; p++) {
+          shadow[p * 3] = data[p * 4]
+          shadow[p * 3 + 1] = data[p * 4 + 1]
+          shadow[p * 3 + 2] = data[p * 4 + 2]
+        }
+        const index = applyPaletteOrdered(data, palette, fw, fh)
+        gif.writeFrame(index, fw, fh, { palette, delay, dispose: 1 })
+      } else {
+        const index = applyPaletteOrderedDelta(
+          data, palette, fw, fh, shadow, DELTA_THRESHOLD, transparentIndex,
+        )
+        gif.writeFrame(index, fw, fh, {
+          palette, delay, transparent: true, transparentIndex, dispose: 1,
+        })
+      }
     } else {
       const index =
-        opts.dither === 'ordered'
-          ? applyPaletteOrdered(data, palette, fw, fh)
-          : opts.dither === 'floyd'
-            ? applyPaletteDithered(data, palette, fw, fh)
-            : applyPalette(data, palette)
+        opts.dither === 'floyd'
+          ? applyPaletteDithered(data, palette, fw, fh)
+          : applyPalette(data, palette)
       gif.writeFrame(index, fw, fh, { palette, delay })
     }
     opts.onProgress?.((i + 1) / frameCount)
