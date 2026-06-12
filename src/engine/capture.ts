@@ -38,13 +38,16 @@ export async function startRecording(): Promise<RecordingSession> {
   })
 
   const mimeType = pickMimeType()
+  // 'text' faz o encoder de tela (VP9) priorizar nitidez de borda/texto em vez
+  // de suavizar como vídeo natural — o blur de texto vinha em parte daqui.
+  const track = stream.getVideoTracks()[0]
+  if (track) track.contentHint = 'text'
   // bitrate alto evita texto borrado/blocado; escala com a resolução capturada.
-  // ~0.2 bit por pixel por frame, com teto de 50 Mbps.
-  const { width = 1920, height = 1080, frameRate = 30 } =
-    stream.getVideoTracks()[0]?.getSettings() ?? {}
+  // ~0.4 bit por pixel por frame, com teto de 50 Mbps.
+  const { width = 1920, height = 1080, frameRate = 30 } = track?.getSettings() ?? {}
   const videoBitsPerSecond = Math.min(
     50_000_000,
-    Math.round(width * height * frameRate * 0.2),
+    Math.round(width * height * frameRate * 0.4),
   )
   const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond })
   const chunks: Blob[] = []
