@@ -3,6 +3,7 @@ import { startRecording, type Recording, type RecordingSession } from './engine'
 import Accordion from './components/Accordion'
 import Footer from './components/Footer'
 import Editor from './components/Editor'
+import { formatElapsed } from './format'
 import './App.css'
 
 type Status = 'idle' | 'recording' | 'recorded'
@@ -12,8 +13,19 @@ function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [previewUrl, setPreviewUrl] = useState('')
   const [open, setOpen] = useState<Section | null>(null)
+  const [elapsed, setElapsed] = useState(0)
   const sessionRef = useRef<RecordingSession | null>(null)
   const recordingRef = useRef<Recording | null>(null)
+
+  // cronômetro de gravação: conta segundos a partir do clique em "Gravar tela"
+  useEffect(() => {
+    if (status !== 'recording') return
+    const startedAt = performance.now()
+    const id = setInterval(() => {
+      setElapsed((performance.now() - startedAt) / 1000)
+    }, 250)
+    return () => clearInterval(id)
+  }, [status])
 
   // avisa antes de sair/atualizar se há gravação ou captura em andamento
   useEffect(() => {
@@ -26,6 +38,7 @@ function App() {
   async function handleStart() {
     try {
       sessionRef.current = await startRecording()
+      setElapsed(0)
       setStatus('recording')
       sessionRef.current.stream
         .getVideoTracks()[0]
@@ -83,13 +96,21 @@ function App() {
               Grave sua tela - deixe ela incrível - compartilhe no seu projeto
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn--solid btn--hero"
-            onClick={recording ? finishRecording : handleStart}
-          >
-            {recording ? 'Parar gravação' : 'Gravar tela'}
-          </button>
+          <div className="hero__record">
+            <button
+              type="button"
+              className="btn btn--solid btn--hero"
+              onClick={recording ? finishRecording : handleStart}
+            >
+              {recording && <span className="live-dot" aria-hidden />}
+              {recording ? 'Parar gravação' : 'Gravar tela'}
+            </button>
+            {recording && (
+              <p className="hero__timer" role="timer" aria-label="Tempo de gravação">
+                {formatElapsed(elapsed)}
+              </p>
+            )}
+          </div>
         </div>
         <Footer />
       </section>

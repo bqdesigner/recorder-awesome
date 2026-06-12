@@ -117,6 +117,45 @@
   color: var(--sub);
 }
 
+/* ---- estado gravando: botão de registro + cronômetro ---- */
+.hero__record {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff3b30;
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.5);
+  }
+  50% {
+    opacity: 0.5;
+    box-shadow: 0 0 0 6px rgba(255, 59, 48, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
+    animation: none;
+  }
+}
+.hero__timer {
+  margin: 0;
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 /* ---- painel: sanfonas ---- */
 .panel__content {
   display: flex;
