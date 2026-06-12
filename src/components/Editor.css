@@ -94,6 +94,43 @@
   bottom: -6px;
 }
 
+/* ---- linha da timeline + corte ---- */
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(728px, 100%);
+}
+.timeline-row .dual {
+  flex: 1;
+  width: auto;
+}
+.crop-tools {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.crop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: #fff;
+  color: #000;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.crop-btn:hover:not(:disabled) {
+  background: rgba(25, 24, 25, 0.06);
+}
+.crop-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ---- estimativa do GIF ---- */
 .estimate {
   margin: 0;
