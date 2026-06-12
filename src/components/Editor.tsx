@@ -26,7 +26,7 @@ interface Props {
 
 const MIN_CROP = 0.02 // recortes menores que isso = limpar
 
-type Section = 'edit' | 'format' | 'export'
+type Section = 'format' | 'export'
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
 type Drag =
   | { mode: 'new'; ox: number; oy: number } // âncora = ponto inicial
@@ -35,8 +35,8 @@ type Drag =
 
 type ExportState = { kind: 'idle' } | { kind: 'download'; progress: number }
 
-// ordem das seções para o gating sequencial (editar → formatar → exportar)
-const ORDER: Section[] = ['edit', 'format', 'export']
+// ordem das seções para o gating sequencial (formatar → exportar)
+const ORDER: Section[] = ['format', 'export']
 
 function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -64,8 +64,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
 
   // navegação: qual seção está aberta + até onde o fluxo foi liberado
-  const [open, setOpen] = useState<Section | null>('edit')
-  const [maxUnlocked, setMaxUnlocked] = useState(0) // 0=edit, 1=format, 2=export
+  const [open, setOpen] = useState<Section | null>('format')
+  const [maxUnlocked, setMaxUnlocked] = useState(0) // 0=format, 1=export
   const [exportState, setExportState] = useState<ExportState>({ kind: 'idle' })
 
   const trimRef = useRef({ start: 0, end: estDuration })
@@ -84,9 +84,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     padding: frame ? 48 : 0,
     screenFill,
   }
-  // na edição mostramos o vídeo cru (sem moldura); formatar/exportar compõem
-  const drawScene: Scene =
-    open === 'edit' ? { ...scene, frame: null, padding: 0 } : scene
 
   // desenha o frame atual no canvas
   function drawFrame() {
@@ -104,7 +101,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     const src = crop
       ? { x: crop.x * vw, y: crop.y * vh, w: crop.w * vw, h: crop.h * vh }
       : { x: 0, y: 0, w: vw, h: vh }
-    compose(c, v, src, drawScene)
+    compose(c, v, src, scene)
   }
   useEffect(() => {
     drawRef.current = drawFrame
@@ -364,7 +361,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
           {overlayText && <div className="stage__overlay">{overlayText}</div>}
         </div>
 
-        {open === 'edit' && (
+        <div className="timeline-row">
           <DualRange
             min={0}
             max={duration}
@@ -379,7 +376,42 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
               seek(t)
             }}
           />
-        )}
+          <div className="crop-tools">
+            {!cropMode ? (
+              <button
+                className="crop-btn"
+                title="Recortar"
+                aria-label="Recortar"
+                onClick={() => setCropMode(true)}
+                disabled={busy}
+              >
+                <ScissorsIcon />
+              </button>
+            ) : (
+              <>
+                <button
+                  className="crop-btn"
+                  title="Confirmar corte"
+                  aria-label="Confirmar corte"
+                  onClick={() => setCropMode(false)}
+                >
+                  <CheckIcon />
+                </button>
+                <button
+                  className="crop-btn"
+                  title="Limpar corte"
+                  aria-label="Limpar corte"
+                  onClick={() => {
+                    setCrop(null)
+                    setCropMode(false)
+                  }}
+                >
+                  <TrashIcon />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
 
         {showEstimate && (
           <p className="estimate">
@@ -394,22 +426,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
       {/* bloco de edição */}
       <aside className="panel">
         <div className="panel__content">
-          {/* Editar */}
-          <Accordion title="Editar" open={open === 'edit'} onToggle={() => toggle('edit')}>
-            <div className="actions">
-              <button
-                className="btn"
-                aria-pressed={cropMode}
-                onClick={() => setCropMode((m) => !m)}
-              >
-                {cropMode ? 'Concluir recorte' : 'Recortar'}
-              </button>
-              <button className="btn" onClick={() => setCrop(null)} disabled={!crop}>
-                Limpar corte
-              </button>
-            </div>
-          </Accordion>
-
           {/* Formatar */}
           <Accordion
             title="Formatar"
@@ -534,11 +550,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
             Nova gravação
           </button>
 
-          {open === 'edit' && (
-            <button className="btn" onClick={() => advance('format')}>
-              Próximo: formatar
-            </button>
-          )}
           {open === 'format' && (
             <button
               className="btn"
@@ -569,6 +580,65 @@ function clamp01(n: number) {
 
 function inside(p: { x: number; y: number }, c: Crop) {
   return p.x >= c.x && p.x <= c.x + c.w && p.y >= c.y && p.y <= c.y + c.h
+}
+
+function ScissorsIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <line x1="20" y1="4" x2="8.12" y2="15.88" />
+      <line x1="14.47" y1="14.48" x2="20" y2="20" />
+      <line x1="8.12" y1="8.12" x2="12" y2="12" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  )
 }
 
 function download(blob: Blob, filename: string) {

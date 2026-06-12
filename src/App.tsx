@@ -7,7 +7,7 @@ import { formatElapsed } from './format'
 import './App.css'
 
 type Status = 'idle' | 'recording' | 'recorded'
-type Section = 'edit' | 'format' | 'export'
+type Section = 'format' | 'export'
 
 function App() {
   const [status, setStatus] = useState<Status>('idle')
@@ -117,17 +117,6 @@ function App() {
 
       <aside className="panel">
         <div className="panel__content">
-          <Accordion title="Editar" open={open === 'edit'} onToggle={() => toggle('edit')}>
-            <div className="actions">
-              <button className="btn" disabled>
-                Recortar
-              </button>
-              <button className="btn" disabled>
-                Limpar corte
-              </button>
-            </div>
-          </Accordion>
-
           <Accordion
             title="Formatar"
             open={open === 'format'}
