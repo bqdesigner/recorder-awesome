@@ -8,6 +8,10 @@
   -webkit-appearance: none;
   appearance: none;
 }
+.cp .swatch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .cp__pop {
   position: absolute;

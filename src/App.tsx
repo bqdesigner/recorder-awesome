@@ -123,8 +123,12 @@ function App() {
             onToggle={() => toggle('format')}
           >
             <div className="section-body">
-              <div className="field" aria-disabled>
-                <span>Moldura</span>
+              <div className="field field--check" aria-disabled>
+                <input type="checkbox" disabled />
+                <span>Adicionar respiro</span>
+              </div>
+              <div className="field field--select" aria-disabled>
+                <span>Nenhuma</span>
                 <Chevron />
               </div>
               <div className="segment is-disabled">

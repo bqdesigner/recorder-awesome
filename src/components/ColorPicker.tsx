@@ -8,10 +8,12 @@ interface Props {
   /** Estado/opção de transparência (só quando faz sentido, ex: fundo). */
   transparent?: boolean
   onTransparent?: () => void
+  /** Desabilita a amostra (não abre o popover). */
+  disabled?: boolean
 }
 
 /** Amostra de cor com popover: opção transparente + entrada manual em hex. */
-function ColorPicker({ value, onChange, transparent, onTransparent }: Props) {
+function ColorPicker({ value, onChange, transparent, onTransparent, disabled }: Props) {
   const [open, setOpen] = useState(false)
   const [hex, setHex] = useState(value.replace('#', ''))
   const ref = useRef<HTMLDivElement>(null)
@@ -39,6 +41,7 @@ function ColorPicker({ value, onChange, transparent, onTransparent }: Props) {
         type="button"
         className={`swatch${transparent ? ' swatch--checker' : ''}`}
         style={transparent ? undefined : { background: value }}
+        disabled={disabled}
         onClick={() =>
           setOpen((o) => {
             if (!o) setHex(value.replace('#', ''))

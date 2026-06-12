@@ -50,6 +50,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [crop, setCrop] = useState<Crop | null>(null)
   const [cropMode, setCropMode] = useState(false)
   const [frameId, setFrameId] = useState('none')
+  const [addRespiro, setAddRespiro] = useState(false)
   const [background, setBackground] = useState('#1e1e1e')
   const [bgTransparent, setBgTransparent] = useState(false)
   const [screenFill, setScreenFill] = useState('#000000')
@@ -79,9 +80,11 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const frame = frameId === 'none' ? null : FRAMES.find((f) => f.id === frameId) ?? null
   const scene: Scene = {
     frame,
-    background: bgTransparent ? 'transparent' : background,
+    // sem respiro o fundo é transparente (vãos de devices/cantos não se misturam
+    // com a moldura escura); no export MP4 vira branco, pois MP4 não tem alpha.
+    background: addRespiro ? (bgTransparent ? 'transparent' : background) : 'transparent',
     fit,
-    padding: frame ? 48 : 0,
+    padding: addRespiro ? 48 : 0,
     screenFill,
   }
 
@@ -148,7 +151,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   // redesenha ao mudar recorte / moldura / background / encaixe / seção
   useEffect(() => {
     drawRef.current()
-  }, [crop, cropMode, frameId, background, bgTransparent, screenFill, fit, open])
+  }, [crop, cropMode, frameId, addRespiro, background, bgTransparent, screenFill, fit, open])
 
   useEffect(() => {
     trimRef.current = { start: trimStart, end: trimEnd }
@@ -270,11 +273,16 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
 
   // --- exportação (baixar / copiar) ---
   async function runExport() {
+    // MP4 não suporta transparência: fundo transparente vira branco no vídeo.
+    const exportScene: Scene =
+      format === 'mp4' && scene.background === 'transparent'
+        ? { ...scene, background: '#ffffff' }
+        : scene
     const opts = {
       start: trimStart,
       end: trimEnd,
       crop: crop ?? undefined,
-      scene,
+      scene: exportScene,
       speed,
     }
     const onProgress = (p: number) =>
@@ -326,7 +334,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
       <section className="recorder">
         <div
           className={`stage${cropMode || busy ? '' : ' clickable'}${
-            bgTransparent ? ' checker' : ''
+            scene.background === 'transparent' ? ' checker' : ''
           }`}
           onClick={() => {
             if (!cropMode && !busy) setPlaying((p) => !p)
@@ -433,12 +441,21 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
             onToggle={() => toggle('format')}
           >
             <fieldset className="section-body" disabled={!unlocked('format')}>
+              <label className="field field--check">
+                <input
+                  type="checkbox"
+                  checked={addRespiro}
+                  onChange={(e) => setAddRespiro(e.target.checked)}
+                />
+                <span>Adicionar respiro</span>
+              </label>
+
               <select
                 className="field field--select"
                 value={frameId}
                 onChange={(e) => setFrameId(e.target.value)}
               >
-                <option value="none">Moldura</option>
+                <option value="none">Nenhuma</option>
                 {FRAMES.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.label}
@@ -468,7 +485,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                 </span>
                 <ColorPicker
                   value={background}
-                  transparent={bgTransparent}
+                  transparent={addRespiro ? bgTransparent : true}
+                  disabled={!addRespiro}
                   onChange={(h) => {
                     setBackground(h)
                     setBgTransparent(false)
@@ -480,7 +498,11 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
               {frame && (
                 <div className="field field--color">
                   <span>Cor da tela</span>
-                  <ColorPicker value={screenFill} onChange={setScreenFill} />
+                  <ColorPicker
+                    value={screenFill}
+                    disabled={fit === 'fill'}
+                    onChange={setScreenFill}
+                  />
                 </div>
               )}
             </fieldset>
