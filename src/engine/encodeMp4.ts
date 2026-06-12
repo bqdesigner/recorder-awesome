@@ -44,12 +44,14 @@ export async function webmToMp4(
 
   const vw = video.videoWidth
   const vh = video.videoHeight
+  // crop em pixel inteiro: fracionário faz o drawImage reamostrar o frame
+  // todo em subpixel e borra o texto (mesmo fix do GIF em encode.ts).
   const crop = opts.crop
   const src = {
-    x: crop ? crop.x * vw : 0,
-    y: crop ? crop.y * vh : 0,
-    w: crop ? crop.w * vw : vw,
-    h: crop ? crop.h * vh : vh,
+    x: crop ? Math.round(crop.x * vw) : 0,
+    y: crop ? Math.round(crop.y * vh) : 0,
+    w: crop ? Math.max(1, Math.round(crop.w * vw)) : vw,
+    h: crop ? Math.max(1, Math.round(crop.h * vh)) : vh,
   }
   const scene = opts.scene ?? DEFAULT_SCENE
 
