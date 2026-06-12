@@ -125,10 +125,10 @@ function App() {
             <div className="section-body">
               <div className="field field--check" aria-disabled>
                 <input type="checkbox" disabled />
-                <span>Adicionar moldura</span>
+                <span>Adicionar respiro</span>
               </div>
               <div className="field field--select" aria-disabled>
-                <span>Borda preta</span>
+                <span>Nenhuma</span>
                 <Chevron />
               </div>
               <div className="segment is-disabled">
