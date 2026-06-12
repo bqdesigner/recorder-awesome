@@ -49,7 +49,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [trimEnd, setTrimEnd] = useState(estDuration)
   const [crop, setCrop] = useState<Crop | null>(null)
   const [cropMode, setCropMode] = useState(false)
-  const [frameId, setFrameId] = useState('none')
+  const [frameId, setFrameId] = useState(FRAMES[0].id)
+  const [addMoldura, setAddMoldura] = useState(false)
   const [background, setBackground] = useState('#1e1e1e')
   const [bgTransparent, setBgTransparent] = useState(false)
   const [screenFill, setScreenFill] = useState('#000000')
@@ -76,12 +77,12 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const unlocked = (s: Section) => ORDER.indexOf(s) <= maxUnlocked
   const busy = exportState.kind === 'download'
 
-  const frame = frameId === 'none' ? null : FRAMES.find((f) => f.id === frameId) ?? null
+  const frame = FRAMES.find((f) => f.id === frameId) ?? null
   const scene: Scene = {
     frame,
     background: bgTransparent ? 'transparent' : background,
     fit,
-    padding: frame ? 48 : 0,
+    padding: addMoldura ? 48 : 0,
     screenFill,
   }
 
@@ -148,7 +149,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   // redesenha ao mudar recorte / moldura / background / encaixe / seção
   useEffect(() => {
     drawRef.current()
-  }, [crop, cropMode, frameId, background, bgTransparent, screenFill, fit, open])
+  }, [crop, cropMode, frameId, addMoldura, background, bgTransparent, screenFill, fit, open])
 
   useEffect(() => {
     trimRef.current = { start: trimStart, end: trimEnd }
@@ -433,12 +434,20 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
             onToggle={() => toggle('format')}
           >
             <fieldset className="section-body" disabled={!unlocked('format')}>
+              <label className="field field--check">
+                <input
+                  type="checkbox"
+                  checked={addMoldura}
+                  onChange={(e) => setAddMoldura(e.target.checked)}
+                />
+                <span>Adicionar moldura</span>
+              </label>
+
               <select
                 className="field field--select"
                 value={frameId}
                 onChange={(e) => setFrameId(e.target.value)}
               >
-                <option value="none">Moldura</option>
                 {FRAMES.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.label}
@@ -469,6 +478,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                 <ColorPicker
                   value={background}
                   transparent={bgTransparent}
+                  disabled={!addMoldura}
                   onChange={(h) => {
                     setBackground(h)
                     setBgTransparent(false)
@@ -477,12 +487,14 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                 />
               </div>
 
-              {frame && (
-                <div className="field field--color">
-                  <span>Cor da tela</span>
-                  <ColorPicker value={screenFill} onChange={setScreenFill} />
-                </div>
-              )}
+              <div className="field field--color">
+                <span>Cor da tela</span>
+                <ColorPicker
+                  value={screenFill}
+                  disabled={fit === 'fill'}
+                  onChange={setScreenFill}
+                />
+              </div>
             </fieldset>
           </Accordion>
 
