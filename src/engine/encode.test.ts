@@ -4,6 +4,9 @@ import {
   subsampleRGBA,
   bayerOffset,
   applyPaletteOrdered,
+  applyPaletteAlphaOrdered,
+  hasRealAlpha,
+  opaquePixels,
   diffMask,
   collectChangedRGBA,
   applyPaletteOrderedMasked,
@@ -137,6 +140,50 @@ describe('applyPaletteOrdered', () => {
     const idx = applyPaletteOrdered(solid(8, 8, 0, 0, 0), bw, 8, 8)
     const blacks = Array.from(idx).filter((v) => v === 0).length
     expect(blacks).toBe(64)
+  })
+})
+
+describe('hasRealAlpha / opaquePixels', () => {
+  it('buffer todo opaco → sem alpha real', () => {
+    expect(hasRealAlpha(solid(4, 4, 10, 10, 10))).toBe(false)
+  })
+
+  it('um pixel transparente → alpha real', () => {
+    const data = solid(4, 4, 10, 10, 10)
+    data[3] = 0
+    expect(hasRealAlpha(data)).toBe(true)
+  })
+
+  it('alpha alto (≥128) não conta como transparência', () => {
+    const data = solid(2, 2, 10, 10, 10)
+    data[3] = 200
+    expect(hasRealAlpha(data)).toBe(false)
+  })
+
+  it('opaquePixels filtra os transparentes', () => {
+    const data = new Uint8ClampedArray([1, 1, 1, 255, 2, 2, 2, 0, 3, 3, 3, 255])
+    const out = opaquePixels(data)
+    expect(Array.from(out)).toEqual([1, 1, 1, 255, 3, 3, 3, 255])
+  })
+})
+
+describe('applyPaletteAlphaOrdered', () => {
+  const bw = [
+    [0, 0, 0],
+    [255, 255, 255],
+  ]
+  const TRANS = 2
+
+  it('pixel transparente vira transparentIndex; opaco é mapeado', () => {
+    const data = new Uint8ClampedArray([255, 255, 255, 255, 9, 9, 9, 0])
+    const idx = applyPaletteAlphaOrdered(data, bw, 2, 1, TRANS)
+    expect(idx[0]).toBe(1)
+    expect(idx[1]).toBe(TRANS)
+  })
+
+  it('cor exata da paleta não recebe dither', () => {
+    const idx = applyPaletteAlphaOrdered(solid(8, 8, 0, 0, 0), bw, 8, 8, TRANS)
+    expect(Array.from(new Set(idx))).toEqual([0])
   })
 })
 

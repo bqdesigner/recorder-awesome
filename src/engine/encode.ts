@@ -132,6 +132,14 @@ export function bayerOffset(x: number, y: number): number {
   return BAYER_8[(y & 7) * 8 + (x & 7)] / 64 - 0.5
 }
 
+/** True se o buffer tem algum pixel com alpha < 128 (transparência real). */
+export function hasRealAlpha(rgba: Uint8ClampedArray): boolean {
+  for (let p = 3; p < rgba.length; p += 4) {
+    if (rgba[p] < 128) return true
+  }
+  return false
+}
+
 /** Mapa cor 24-bit → índice, pros acertos exatos de paleta. */
 function buildExactMap(palette: number[][]): Map<number, number> {
   const m = new Map<number, number>()
@@ -194,6 +202,64 @@ export const DELTA_THRESHOLD = 4
  * resíduo que o threshold do delta tenha deixado acumular.
  */
 export const KEYFRAME_INTERVAL = 24
+
+/**
+ * Mapeia RGBA com alpha real → índices: pixel com alpha < 128 vira
+ * `transparentIndex`; o resto segue o mapeamento exato-ou-dither do caminho
+ * ordered. Usado pra GIF com transparência de verdade (ex: vãos de moldura).
+ */
+export function applyPaletteAlphaOrdered(
+  rgba: Uint8ClampedArray,
+  palette: number[][],
+  w: number,
+  h: number,
+  transparentIndex: number,
+): Uint8Array {
+  const index = new Uint8Array(w * h)
+  const exact = buildExactMap(palette)
+  const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x
+      const i = p * 4
+      if (rgba[i + 3] < 128) {
+        index[p] = transparentIndex
+        continue
+      }
+      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
+      const hit = exact.get((r0 << 16) | (g0 << 8) | b0)
+      if (hit !== undefined) {
+        index[p] = hit
+        continue
+      }
+      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
+      let r = r0 + off, g = g0 + off, b = b0 + off
+      r = r < 0 ? 0 : r > 255 ? 255 : r
+      g = g < 0 ? 0 : g > 255 ? 255 : g
+      b = b < 0 ? 0 : b > 255 ? 255 : b
+      const key = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+      let idx = cache[key]
+      if (idx === -1) idx = cache[key] = nearestIndex(r, g, b, palette)
+      index[p] = idx
+    }
+  }
+  return index
+}
+
+/** Pixels opacos (alpha ≥ 128) de um buffer RGBA, compactados. */
+export function opaquePixels(rgba: Uint8ClampedArray): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(rgba.length)
+  let o = 0
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i + 3] < 128) continue
+    out[o] = rgba[i]
+    out[o + 1] = rgba[i + 1]
+    out[o + 2] = rgba[i + 2]
+    out[o + 3] = 255
+    o += 4
+  }
+  return out.subarray(0, o) as Uint8ClampedArray
+}
 
 /**
  * Marca os pixels que mudaram além de `threshold` por canal desde a última
@@ -417,15 +483,23 @@ export async function webmToGif(
     return { data: ctx.getImageData(0, 0, fw, fh).data, fw, fh }
   }
 
+  // O fundo "transparente" só importa se o frame composto tem alpha DE VERDADE
+  // (ex: vãos de moldura tipo Notebook). No caso default (sem respiro, vídeo
+  // cobrindo o canvas inteiro) não há pixel transparente nenhum — e antes esse
+  // caso caía no caminho rgba4444 do gifenc (4 bits/canal), a causa raiz da
+  // qualidade horrível do export default.
+  const alphaMode = transparent && hasRealAlpha((await renderFrameData(0)).data)
+
   // Delta + paleta local por frame (algoritmo do gifcap) no caminho ordered +
-  // fundo opaco. Uma paleta global de 256 cores não cobre uma UI inteira (ex:
-  // tema dark vira ~12 tons de cinza com manchas); a paleta local dá 255 cores
-  // só pros pixels que mudaram, e o delta garante que o estático fica intacto
-  // (sem flicker) e que o quantize roda só sobre a região alterada (rápido).
-  const useDelta = !transparent && opts.dither === 'ordered'
+  // conteúdo opaco. Uma paleta global de 256 cores não cobre uma UI inteira
+  // (ex: tema dark vira ~12 tons de cinza com manchas); a paleta local dá 255
+  // cores só pros pixels que mudaram, e o delta garante que o estático fica
+  // intacto (sem flicker) e que o quantize roda só na região alterada (rápido).
+  const useDelta = !alphaMode && opts.dither === 'ordered'
 
   // --- paleta global única: só nos caminhos sem delta ---
   let palette: number[][] | null = null
+  let alphaTransparentIndex = -1
   if (!useDelta) {
     const sampleIdx = sampleFrameIndices(frameCount, MAX_PALETTE_SAMPLES)
     const chunks: Uint8ClampedArray[] = []
@@ -441,9 +515,13 @@ export async function webmToGif(
       sampleBuf.set(chunks[k], off)
       off += chunks[k].length
     }
-    palette = transparent
-      ? quantize(sampleBuf, 256, { format: 'rgba4444', oneBitAlpha: true })
-      : quantize(sampleBuf, 256)
+    if (alphaMode) {
+      palette = quantizeRGB(opaquePixels(sampleBuf), 255)
+      palette.push([0, 0, 0]) // slot transparente
+      alphaTransparentIndex = palette.length - 1
+    } else {
+      palette = quantize(sampleBuf, 256)
+    }
   }
 
   // Estado do delta: RGB cru da última escrita por pixel + última paleta local
@@ -454,9 +532,12 @@ export async function webmToGif(
 
   for (let i = 0; i < frameCount; i++) {
     const { data, fw, fh } = await renderFrameData(i)
-    if (transparent) {
-      const index = applyPalette(data, palette!, 'rgba4444')
-      gif.writeFrame(index, fw, fh, { palette: palette!, delay, transparent: true })
+    if (alphaMode) {
+      const index = applyPaletteAlphaOrdered(data, palette!, fw, fh, alphaTransparentIndex)
+      gif.writeFrame(index, fw, fh, {
+        palette: palette!, delay,
+        transparent: true, transparentIndex: alphaTransparentIndex,
+      })
     } else if (useDelta) {
       if (!shadow || i % KEYFRAME_INTERVAL === 0) {
         // keyframe (1º frame e a cada N): frame inteiro, paleta local cheia.
