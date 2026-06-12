@@ -1,6 +1,7 @@
 /** Exporta um webm gravado como GIF, amostrando frames via <video> + canvas. */
 
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
+import { quantizeRGB } from './quantizeRGB'
 import { compose, type Scene } from './compose'
 import { loadVideo, seekTo } from './video'
 
@@ -131,10 +132,22 @@ export function bayerOffset(x: number, y: number): number {
   return BAYER_8[(y & 7) * 8 + (x & 7)] / 64 - 0.5
 }
 
+/** Mapa cor 24-bit → índice, pros acertos exatos de paleta. */
+function buildExactMap(palette: number[][]): Map<number, number> {
+  const m = new Map<number, number>()
+  for (let i = 0; i < palette.length; i++) {
+    const p = palette[i]
+    const key = (p[0] << 16) | (p[1] << 8) | p[2]
+    if (!m.has(key)) m.set(key, i)
+  }
+  return m
+}
+
 /**
  * Mapeia RGBA → índices de palette com dithering ordenado (Bayer 8×8).
- * Soma um limiar por posição antes de buscar a cor mais próxima — quebra o
- * banding como o Floyd–Steinberg, mas sem variar entre frames.
+ * Cor presente na paleta usa o índice exato SEM dither (chapado fica limpo);
+ * só cores sem representação exata recebem o limiar Bayer — quebra o banding
+ * como o Floyd–Steinberg, mas sem variar entre frames.
  */
 export function applyPaletteOrdered(
   rgba: Uint8ClampedArray,
@@ -143,12 +156,19 @@ export function applyPaletteOrdered(
   h: number,
 ): Uint8Array {
   const index = new Uint8Array(w * h)
+  const exact = buildExactMap(palette)
   const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
       const i = (y * w + x) * 4
-      let r = rgba[i] + off, g = rgba[i + 1] + off, b = rgba[i + 2] + off
+      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
+      const hit = exact.get((r0 << 16) | (g0 << 8) | b0)
+      if (hit !== undefined) {
+        index[y * w + x] = hit
+        continue
+      }
+      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
+      let r = r0 + off, g = g0 + off, b = b0 + off
       r = r < 0 ? 0 : r > 255 ? 255 : r
       g = g < 0 ? 0 : g > 255 ? 255 : g
       b = b < 0 ? 0 : b > 255 ? 255 : b
@@ -164,8 +184,16 @@ export function applyPaletteOrdered(
 /**
  * Limiar por canal pra considerar um pixel "mudado" entre frames. Absorve o
  * ruído do VP9 (MediaRecorder), que perturba pixels estáticos por compressão.
+ * Tem que ficar ABAIXO do contraste mínimo de UIs dark (~7 entre superfícies),
+ * senão mudanças reais são engolidas e viram rastro (ghosting).
  */
-export const DELTA_THRESHOLD = 8
+export const DELTA_THRESHOLD = 4
+
+/**
+ * A cada N frames força um keyframe (frame inteiro re-escrito): limpa qualquer
+ * resíduo que o threshold do delta tenha deixado acumular.
+ */
+export const KEYFRAME_INTERVAL = 24
 
 /**
  * Marca os pixels que mudaram além de `threshold` por canal desde a última
@@ -242,6 +270,7 @@ export function applyPaletteOrderedMasked(
   shadow: Uint8ClampedArray,
 ): Uint8Array {
   const index = new Uint8Array(w * h)
+  const exact = buildExactMap(palette)
   const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -256,6 +285,11 @@ export function applyPaletteOrderedMasked(
       shadow[s] = r0
       shadow[s + 1] = g0
       shadow[s + 2] = b0
+      const hit = exact.get((r0 << 16) | (g0 << 8) | b0)
+      if (hit !== undefined) {
+        index[p] = hit
+        continue
+      }
       const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
       let r = r0 + off, g = g0 + off, b = b0 + off
       r = r < 0 ? 0 : r > 255 ? 255 : r
@@ -424,15 +458,16 @@ export async function webmToGif(
       const index = applyPalette(data, palette!, 'rgba4444')
       gif.writeFrame(index, fw, fh, { palette: palette!, delay, transparent: true })
     } else if (useDelta) {
-      if (!shadow) {
-        // primeiro frame: paleta local do frame inteiro, escreve tudo
-        shadow = new Uint8ClampedArray(fw * fh * 3)
+      if (!shadow || i % KEYFRAME_INTERVAL === 0) {
+        // keyframe (1º frame e a cada N): frame inteiro, paleta local cheia.
+        // Limpa qualquer resíduo que o threshold do delta tenha deixado.
+        shadow ??= new Uint8ClampedArray(fw * fh * 3)
         for (let p = 0; p < fw * fh; p++) {
           shadow[p * 3] = data[p * 4]
           shadow[p * 3 + 1] = data[p * 4 + 1]
           shadow[p * 3 + 2] = data[p * 4 + 2]
         }
-        const pal = quantize(subsampleRGBA(data, 2), 255)
+        const pal = quantizeRGB(subsampleRGBA(data, 2), 255)
         pal.push([0, 0, 0]) // slot transparente (cor irrelevante)
         const index = applyPaletteOrdered(data, pal, fw, fh)
         gif.writeFrame(index, fw, fh, { palette: pal, delay, dispose: 1 })
@@ -449,8 +484,8 @@ export async function webmToGif(
           })
         } else {
           // paleta local só dos pixels alterados (255 cores pro delta)
-          const stride = count > 250_000 ? 4 : 1
-          const pal = quantize(collectChangedRGBA(data, mask, count, stride), 255)
+          const stride = count > 500_000 ? 2 : 1
+          const pal = quantizeRGB(collectChangedRGBA(data, mask, count, stride), 255)
           pal.push([0, 0, 0])
           const transparentIndex = pal.length - 1
           const index = applyPaletteOrderedMasked(
