@@ -28,6 +28,13 @@ interface Props {
 
 const MIN_CROP = 0.02 // recortes menores que isso = limpar
 
+// Bytes por pixel/frame pra estimar o peso do GIF. Calibrado contra exports
+// reais do pipeline delta (estático vira transparente → comprime muito): uma
+// gravação que dava ~40 MB na heurística antiga (0,18) baixava em ~5 MB no
+// arquivo final. Leve margem acima do medido (~0,0225) pra não subestimar
+// gravações com mais movimento. Aproximação — varia com a quantidade de mudança.
+const GIF_BYTES_PER_PX = 0.025
+
 type Section = 'format' | 'export'
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
 type Drag =
@@ -331,7 +338,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     const oh = Math.max(1, Math.round(height * s))
     const span = Math.max(0, (trimEnd - trimStart) / speed)
     const frames = Math.max(1, Math.round(span * fps))
-    const mb = (frames * ow * oh * 0.18) / 1e6
+    const mb = (frames * ow * oh * GIF_BYTES_PER_PX) / 1e6
     return { ow, oh, frames, mb }
   }
 
