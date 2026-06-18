@@ -5,3 +5,10 @@ export function formatElapsed(seconds: number): string {
   const secs = total % 60
   return `${mins}:${String(secs).padStart(2, '0')}`
 }
+
+/** Nome default do arquivo exportado: "RecordingAwesome-YYYY-MM-DD_HH-MM-SS.<ext>". */
+export function exportFilename(ext: string, date: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}_${p(date.getHours())}-${p(date.getMinutes())}-${p(date.getSeconds())}`
+  return `RecordingAwesome-${stamp}.${ext}`
+}

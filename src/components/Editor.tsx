@@ -9,6 +9,7 @@ import {
   type Scene,
   type Fit,
 } from '../engine'
+import { exportFilename } from '../format'
 import Accordion from './Accordion'
 import ColorPicker from './ColorPicker'
 import Footer from './Footer'
@@ -297,7 +298,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     setExportState({ kind: 'download', progress: 0 })
     try {
       const out = await runExport()
-      download(out, format === 'mp4' ? 'gravacao.mp4' : 'gravacao.gif')
+      download(out, exportFilename(format === 'mp4' ? 'mp4' : 'gif'))
     } finally {
       setExportState({ kind: 'idle' })
     }

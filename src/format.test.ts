@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatElapsed } from './format'
+import { exportFilename, formatElapsed } from './format'
 
 describe('formatElapsed', () => {
   it('formata zero', () => {
@@ -32,5 +32,28 @@ describe('formatElapsed', () => {
 
   it('trata negativo como zero', () => {
     expect(formatElapsed(-3)).toBe('0:00')
+  })
+})
+
+describe('exportFilename', () => {
+  const date = new Date(2026, 5, 18, 18, 30, 45) // 2026-06-18 18:30:45 (mês 0-based)
+
+  it('monta nome com prefixo, timestamp e extensão', () => {
+    expect(exportFilename('gif', date)).toBe('RecordingAwesome-2026-06-18_18-30-45.gif')
+  })
+
+  it('respeita a extensão passada', () => {
+    expect(exportFilename('mp4', date)).toBe('RecordingAwesome-2026-06-18_18-30-45.mp4')
+  })
+
+  it('zero-pad em mês, dia, hora, minuto e segundo de um dígito', () => {
+    const d = new Date(2026, 0, 3, 4, 5, 6) // 2026-01-03 04:05:06
+    expect(exportFilename('gif', d)).toBe('RecordingAwesome-2026-01-03_04-05-06.gif')
+  })
+
+  it('usa a data atual quando nenhuma é passada', () => {
+    expect(exportFilename('gif')).toMatch(
+      /^RecordingAwesome-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.gif$/,
+    )
   })
 })
