@@ -577,8 +577,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                   disabled={format !== 'gif'}
                 >
                   <option value="auto">Auto</option>
-                  <option value={1}>100%</option>
-                  <option value={0.5}>50%</option>
+                  <option value={1}>100% - High quality</option>
+                  <option value={0.5}>50% - Medium Fidelity</option>
                 </select>
               </div>
             </fieldset>
