@@ -4,6 +4,7 @@ import {
   webmToMp4,
   compose,
   composedSize,
+  autoScale,
   FRAMES,
   type Crop,
   type Scene,
@@ -26,6 +27,13 @@ interface Props {
 }
 
 const MIN_CROP = 0.02 // recortes menores que isso = limpar
+
+// Bytes por pixel/frame pra estimar o peso do GIF. Calibrado contra exports
+// reais do pipeline delta (estático vira transparente → comprime muito): uma
+// gravação que dava ~40 MB na heurística antiga (0,18) baixava em ~5 MB no
+// arquivo final. Leve margem acima do medido (~0,0225) pra não subestimar
+// gravações com mais movimento. Aproximação — varia com a quantidade de mudança.
+const GIF_BYTES_PER_PX = 0.025
 
 type Section = 'format' | 'export'
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
@@ -59,7 +67,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [format, setFormat] = useState<'gif' | 'mp4'>('gif')
   const [speed, setSpeed] = useState(1)
   const [fps, setFps] = useState(15)
-  const [scale, setScale] = useState(1)
+  const [scale, setScale] = useState<number | 'auto'>('auto')
   const [playing, setPlaying] = useState(true)
   const [playhead, setPlayhead] = useState(0)
   const [ready, setReady] = useState(false)
@@ -273,6 +281,12 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     setOpen(to)
   }
 
+  // Resolve a escala efetiva: 'auto' → fator que limita a maior dimensão da
+  // saída a DEFAULT_MAX_DIMENSION; número → ele mesmo. Usado no export e na
+  // estimativa pra que o número exibido reflita a resolução realmente gerada.
+  const resolveScale = (w: number, h: number) =>
+    scale === 'auto' ? autoScale(w, h) : scale
+
   // --- exportação (baixar / copiar) ---
   async function runExport() {
     // MP4 não suporta transparência: fundo transparente vira branco no vídeo.
@@ -289,9 +303,16 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     }
     const onProgress = (p: number) =>
       setExportState((s) => (s.kind === 'download' ? { ...s, progress: p } : s))
-    return format === 'mp4'
-      ? webmToMp4(blob, duration, { ...opts, onProgress })
-      : webmToGif(blob, duration, { ...opts, onProgress, fps, scale, dither })
+    if (format === 'mp4') return webmToMp4(blob, duration, { ...opts, onProgress })
+
+    let outScale = typeof scale === 'number' ? scale : 1
+    if (dims) {
+      const srcW = crop ? crop.w * dims.w : dims.w
+      const srcH = crop ? crop.h * dims.h : dims.h
+      const { width, height } = composedSize(exportScene, srcW, srcH)
+      outScale = resolveScale(width, height)
+    }
+    return webmToGif(blob, duration, { ...opts, onProgress, fps, scale: outScale, dither })
   }
 
   async function handleDownload() {
@@ -312,11 +333,12 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     const srcW = crop ? crop.w * vw : vw
     const srcH = crop ? crop.h * vh : vh
     const { width, height } = composedSize(scene, srcW, srcH)
-    const ow = Math.max(1, Math.round(width * scale))
-    const oh = Math.max(1, Math.round(height * scale))
+    const s = resolveScale(width, height)
+    const ow = Math.max(1, Math.round(width * s))
+    const oh = Math.max(1, Math.round(height * s))
     const span = Math.max(0, (trimEnd - trimStart) / speed)
     const frames = Math.max(1, Math.round(span * fps))
-    const mb = (frames * ow * oh * 0.18) / 1e6
+    const mb = (frames * ow * oh * GIF_BYTES_PER_PX) / 1e6
     return { ow, oh, frames, mb }
   }
 
@@ -556,12 +578,14 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                 <select
                   className="field field--select field--res"
                   value={scale}
-                  onChange={(e) => setScale(+e.target.value)}
+                  onChange={(e) =>
+                    setScale(e.target.value === 'auto' ? 'auto' : +e.target.value)
+                  }
                   disabled={format !== 'gif'}
                 >
-                  <option value={1}>100%</option>
-                  <option value={0.75}>75%</option>
-                  <option value={0.5}>50%</option>
+                  <option value="auto">Auto</option>
+                  <option value={1}>100% - High quality</option>
+                  <option value={0.5}>50% - Medium Fidelity</option>
                 </select>
               </div>
             </fieldset>

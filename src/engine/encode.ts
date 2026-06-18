@@ -42,6 +42,25 @@ export interface GifOptions {
   onProgress?: (p: number) => void
 }
 
+/** Maior dimensão (px) da saída GIF no modo automático. Capturas acima disso
+ * são reduzidas; abaixo ficam intactas. GIF não se beneficia de resolução alta,
+ * então o teto corta peso (~quadrático na dimensão) sem perda perceptível. */
+export const DEFAULT_MAX_DIMENSION = 1280
+
+/**
+ * Fator de escala que limita a MAIOR dimensão da saída a `maxDim`. Nunca amplia
+ * (teto em 1): captura já pequena devolve 1 (sem alteração). Pura — testável.
+ */
+export function autoScale(
+  width: number,
+  height: number,
+  maxDim = DEFAULT_MAX_DIMENSION,
+): number {
+  const longest = Math.max(width, height)
+  if (longest <= maxDim) return 1
+  return maxDim / longest
+}
+
 /** Índice da cor mais próxima na palette (busca linear RGB). */
 function nearestIndex(r: number, g: number, b: number, palette: number[][]) {
   let best = 0

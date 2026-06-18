@@ -10,6 +10,8 @@ import {
   diffMask,
   collectChangedRGBA,
   applyPaletteOrderedMasked,
+  autoScale,
+  DEFAULT_MAX_DIMENSION,
   DELTA_THRESHOLD,
 } from './encode'
 
@@ -33,6 +35,42 @@ describe('sampleFrameIndices', () => {
   it('é robusto a frameCount ou maxSamples degenerados', () => {
     expect(sampleFrameIndices(0, 24)).toEqual([0])
     expect(sampleFrameIndices(50, 1)).toEqual([0])
+  })
+})
+
+describe('autoScale', () => {
+  it('não altera (1) quando a maior dimensão cabe no teto', () => {
+    expect(autoScale(1280, 720)).toBe(1)
+    expect(autoScale(800, 600)).toBe(1)
+    expect(autoScale(1280, 1280)).toBe(1) // exatamente no teto
+  })
+
+  it('reduz pra limitar a maior dimensão ao teto', () => {
+    expect(autoScale(2560, 1440)).toBe(0.5)
+    expect(autoScale(1920, 1080)).toBeCloseTo(1280 / 1920, 10)
+    expect(autoScale(720, 1600)).toBeCloseTo(1280 / 1600, 10) // retrato: usa altura
+  })
+
+  it('nunca amplia (teto em 1)', () => {
+    expect(autoScale(100, 100)).toBeLessThanOrEqual(1)
+    expect(autoScale(3000, 100)).toBeLessThanOrEqual(1)
+  })
+
+  it('respeita maxDim customizado', () => {
+    expect(autoScale(2000, 1000, 1000)).toBe(0.5)
+    expect(autoScale(500, 500, 1000)).toBe(1)
+  })
+
+  it('captura grande gera redução de área relevante (≥ ~55% mais leve a 1080p)', () => {
+    // peso do GIF ~ proporcional à área (px por frame); área = (s)²
+    const s = autoScale(1920, 1080)
+    const areaRatio = s * s
+    expect(areaRatio).toBeLessThan(0.45) // saída ≤ 45% da área original
+  })
+
+  it('DEFAULT_MAX_DIMENSION é o teto usado por padrão', () => {
+    const s = autoScale(DEFAULT_MAX_DIMENSION * 2, 10)
+    expect(s).toBe(0.5)
   })
 })
 

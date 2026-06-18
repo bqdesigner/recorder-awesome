@@ -1,7 +1,7 @@
 export type { ExportFormat, Stage } from './types'
 export { startRecording } from './capture'
 export type { Recording, RecordingSession } from './capture'
-export { webmToGif } from './encode'
+export { webmToGif, autoScale, DEFAULT_MAX_DIMENSION } from './encode'
 export type { GifOptions, Crop } from './encode'
 export { webmToMp4 } from './encodeMp4'
 export type { Mp4Options } from './encodeMp4'
