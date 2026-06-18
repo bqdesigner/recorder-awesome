@@ -578,7 +578,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                 >
                   <option value="auto">Auto</option>
                   <option value={1}>100%</option>
-                  <option value={0.75}>75%</option>
                   <option value={0.5}>50%</option>
                 </select>
               </div>
