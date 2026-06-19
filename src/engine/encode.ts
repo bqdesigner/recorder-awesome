@@ -2,6 +2,7 @@
 
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
 import { quantizeRGB } from './quantizeRGB'
+import { halvingSteps, unsharpMask } from './sharpen'
 import { compose, type Scene } from './compose'
 import { loadVideo, seekTo } from './video'
 
@@ -459,10 +460,13 @@ export async function webmToGif(
   const scene = opts.scene ?? DEFAULT_SCENE
 
   const canvas = document.createElement('canvas')
-  // canvas de saída downscaled (usado só quando scale < 1)
+  // dois canvases de scratch pro downscale progressivo (usados só com scale < 1):
+  // o step-down faz ping-pong entre eles, nunca escreve no `canvas` composto.
   const scale = Math.min(1, Math.max(0.01, opts.scale ?? 1))
   const out = document.createElement('canvas')
   const outCtx = out.getContext('2d', { willReadFrequently: true })!
+  const tmp = document.createElement('canvas')
+  const tmpCtx = tmp.getContext('2d', { willReadFrequently: true })!
 
   // trecho a exportar (trim) + velocidade
   const speed = opts.speed ?? 1
@@ -492,13 +496,30 @@ export async function webmToGif(
     if (scale < 1) {
       fw = Math.max(1, Math.round(composed.width * scale))
       fh = Math.max(1, Math.round(composed.height * scale))
-      out.width = fw
-      out.height = fh
-      outCtx.clearRect(0, 0, fw, fh)
-      outCtx.imageSmoothingEnabled = true
-      outCtx.imageSmoothingQuality = 'high'
-      outCtx.drawImage(canvas, 0, 0, composed.width, composed.height, 0, 0, fw, fh)
-      return { data: outCtx.getImageData(0, 0, fw, fh).data, fw, fh }
+      // downscale em saltos de ~2× (step-down) em vez de um salto bilinear só:
+      // preserva mais detalhe de texto/borda. Ping-pong entre out/tmp pra nunca
+      // ler e escrever o mesmo canvas no mesmo draw.
+      const pool = [{ c: out, x: outCtx }, { c: tmp, x: tmpCtx }]
+      let curC: HTMLCanvasElement = canvas
+      let curX = outCtx
+      let curW = composed.width
+      let curH = composed.height
+      for (const s of halvingSteps(composed.width, composed.height, fw, fh)) {
+        const dst = pool.find((p) => p.c !== curC)!
+        dst.c.width = s.w
+        dst.c.height = s.h
+        dst.x.clearRect(0, 0, s.w, s.h)
+        dst.x.imageSmoothingEnabled = true
+        dst.x.imageSmoothingQuality = 'high'
+        dst.x.drawImage(curC, 0, 0, curW, curH, 0, 0, s.w, s.h)
+        curC = dst.c
+        curX = dst.x
+        curW = s.w
+        curH = s.h
+      }
+      // unsharp recupera a nitidez de borda perdida na redução
+      const data = unsharpMask(curX.getImageData(0, 0, fw, fh).data, fw, fh)
+      return { data, fw, fh }
     }
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!
     return { data: ctx.getImageData(0, 0, fw, fh).data, fw, fh }
