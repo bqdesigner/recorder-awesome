@@ -2,6 +2,7 @@
 
 import { GIFEncoder, quantize, applyPalette } from 'gifenc'
 import { quantizeRGB } from './quantizeRGB'
+import { halvingSteps, unsharpMask } from './sharpen'
 import { compose, type Scene } from './compose'
 import { loadVideo, seekTo } from './video'
 
@@ -151,6 +152,62 @@ export function bayerOffset(x: number, y: number): number {
   return BAYER_8[(y & 7) * 8 + (x & 7)] / 64 - 0.5
 }
 
+/**
+ * Distância² (soma dos quadrados por canal) abaixo da qual um pixel "encosta"
+ * numa cor da paleta e é mapeado DIRETO, sem dither. ~5/canal: absorve o ruído
+ * do VP9 em áreas chapadas de UI dark (onde a paleta local é densa e a cor mais
+ * próxima fica colada) → fundo liso e estável, igual ao gifcap. Só cores
+ * genuinamente distantes da paleta (banding real de gradiente) caem no dither.
+ */
+export const NEAR_SNAP_DIST2 = 100
+
+/**
+ * Mapeia uma cor RGB → índice no caminho ordenado, com três níveis:
+ * 1. acerto exato na paleta → índice direto;
+ * 2. acerto PRÓXIMO (dist² ≤ NEAR_SNAP_DIST2) → nearest do ORIGINAL, sem dither
+ *    (decisão independente de (x,y) → área chapada fica limpa e não cintila);
+ * 3. cor distante → Bayer ordenado (quebra banding de gradiente real).
+ * `snapCache` (rgb565→índice ou -1=dither, -2=não-computado) e `ditherCache`
+ * (rgb565→índice) evitam recomputar nearest por cor repetida.
+ */
+function mapOrdered(
+  r0: number,
+  g0: number,
+  b0: number,
+  x: number,
+  y: number,
+  palette: number[][],
+  exact: Map<number, number>,
+  snapCache: Int16Array,
+  ditherCache: Int16Array,
+): number {
+  const hit = exact.get((r0 << 16) | (g0 << 8) | b0)
+  if (hit !== undefined) return hit
+  const sk = ((r0 >> 3) << 11) | ((g0 >> 2) << 5) | (b0 >> 3)
+  let snap = snapCache[sk]
+  if (snap === -2) {
+    // nearest do ORIGINAL (sem offset): decisão estável, não depende da posição
+    let best = 0, min = Infinity
+    for (let i = 0; i < palette.length; i++) {
+      const p = palette[i]
+      const d = (p[0] - r0) ** 2 + (p[1] - g0) ** 2 + (p[2] - b0) ** 2
+      if (d < min) { min = d; best = i }
+    }
+    snap = min <= NEAR_SNAP_DIST2 ? best : -1
+    snapCache[sk] = snap
+  }
+  if (snap >= 0) return snap
+  const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
+  let r = r0 + off, g = g0 + off, b = b0 + off
+  r = r < 0 ? 0 : r > 255 ? 255 : r
+  g = g < 0 ? 0 : g > 255 ? 255 : g
+  b = b < 0 ? 0 : b > 255 ? 255 : b
+  const dk = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+  let idx = ditherCache[dk]
+  if (idx === -1) idx = ditherCache[dk] = nearestIndex(r, g, b, palette)
+  return idx
+}
+
 /** True se o buffer tem algum pixel com alpha < 128 (transparência real). */
 export function hasRealAlpha(rgba: Uint8ClampedArray): boolean {
   for (let p = 3; p < rgba.length; p += 4) {
@@ -171,10 +228,9 @@ function buildExactMap(palette: number[][]): Map<number, number> {
 }
 
 /**
- * Mapeia RGBA → índices de palette com dithering ordenado (Bayer 8×8).
- * Cor presente na paleta usa o índice exato SEM dither (chapado fica limpo);
- * só cores sem representação exata recebem o limiar Bayer — quebra o banding
- * como o Floyd–Steinberg, mas sem variar entre frames.
+ * Mapeia RGBA → índices de palette no caminho ordenado (ver `mapOrdered`):
+ * exato → índice direto; próximo → snap sem dither (chapado limpo); distante →
+ * Bayer 8×8 (quebra banding de gradiente). Estável entre frames.
  */
 export function applyPaletteOrdered(
   rgba: Uint8ClampedArray,
@@ -184,25 +240,15 @@ export function applyPaletteOrdered(
 ): Uint8Array {
   const index = new Uint8Array(w * h)
   const exact = buildExactMap(palette)
-  const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
+  const snapCache = new Int16Array(65536).fill(-2)
+  const ditherCache = new Int16Array(65536).fill(-1)
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4
-      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
-      const hit = exact.get((r0 << 16) | (g0 << 8) | b0)
-      if (hit !== undefined) {
-        index[y * w + x] = hit
-        continue
-      }
-      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
-      let r = r0 + off, g = g0 + off, b = b0 + off
-      r = r < 0 ? 0 : r > 255 ? 255 : r
-      g = g < 0 ? 0 : g > 255 ? 255 : g
-      b = b < 0 ? 0 : b > 255 ? 255 : b
-      const key = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-      let idx = cache[key]
-      if (idx === -1) idx = cache[key] = nearestIndex(r, g, b, palette)
-      index[y * w + x] = idx
+      index[y * w + x] = mapOrdered(
+        rgba[i], rgba[i + 1], rgba[i + 2], x, y,
+        palette, exact, snapCache, ditherCache,
+      )
     }
   }
   return index
@@ -236,7 +282,8 @@ export function applyPaletteAlphaOrdered(
 ): Uint8Array {
   const index = new Uint8Array(w * h)
   const exact = buildExactMap(palette)
-  const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
+  const snapCache = new Int16Array(65536).fill(-2)
+  const ditherCache = new Int16Array(65536).fill(-1)
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const p = y * w + x
@@ -245,21 +292,10 @@ export function applyPaletteAlphaOrdered(
         index[p] = transparentIndex
         continue
       }
-      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
-      const hit = exact.get((r0 << 16) | (g0 << 8) | b0)
-      if (hit !== undefined) {
-        index[p] = hit
-        continue
-      }
-      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
-      let r = r0 + off, g = g0 + off, b = b0 + off
-      r = r < 0 ? 0 : r > 255 ? 255 : r
-      g = g < 0 ? 0 : g > 255 ? 255 : g
-      b = b < 0 ? 0 : b > 255 ? 255 : b
-      const key = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-      let idx = cache[key]
-      if (idx === -1) idx = cache[key] = nearestIndex(r, g, b, palette)
-      index[p] = idx
+      index[p] = mapOrdered(
+        rgba[i], rgba[i + 1], rgba[i + 2], x, y,
+        palette, exact, snapCache, ditherCache,
+      )
     }
   }
   return index
@@ -356,7 +392,8 @@ export function applyPaletteOrderedMasked(
 ): Uint8Array {
   const index = new Uint8Array(w * h)
   const exact = buildExactMap(palette)
-  const cache = new Int16Array(65536).fill(-1) // chave rgb565 → índice
+  const snapCache = new Int16Array(65536).fill(-2)
+  const ditherCache = new Int16Array(65536).fill(-1)
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const p = y * w + x
@@ -366,24 +403,13 @@ export function applyPaletteOrderedMasked(
       }
       const i = p * 4
       const s = p * 3
-      const r0 = rgba[i], g0 = rgba[i + 1], b0 = rgba[i + 2]
-      shadow[s] = r0
-      shadow[s + 1] = g0
-      shadow[s + 2] = b0
-      const hit = exact.get((r0 << 16) | (g0 << 8) | b0)
-      if (hit !== undefined) {
-        index[p] = hit
-        continue
-      }
-      const off = bayerOffset(x, y) * ORDERED_DITHER_STRENGTH
-      let r = r0 + off, g = g0 + off, b = b0 + off
-      r = r < 0 ? 0 : r > 255 ? 255 : r
-      g = g < 0 ? 0 : g > 255 ? 255 : g
-      b = b < 0 ? 0 : b > 255 ? 255 : b
-      const key = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-      let idx = cache[key]
-      if (idx === -1) idx = cache[key] = nearestIndex(r, g, b, palette)
-      index[p] = idx
+      shadow[s] = rgba[i]
+      shadow[s + 1] = rgba[i + 1]
+      shadow[s + 2] = rgba[i + 2]
+      index[p] = mapOrdered(
+        rgba[i], rgba[i + 1], rgba[i + 2], x, y,
+        palette, exact, snapCache, ditherCache,
+      )
     }
   }
   return index
@@ -459,10 +485,13 @@ export async function webmToGif(
   const scene = opts.scene ?? DEFAULT_SCENE
 
   const canvas = document.createElement('canvas')
-  // canvas de saída downscaled (usado só quando scale < 1)
+  // dois canvases de scratch pro downscale progressivo (usados só com scale < 1):
+  // o step-down faz ping-pong entre eles, nunca escreve no `canvas` composto.
   const scale = Math.min(1, Math.max(0.01, opts.scale ?? 1))
   const out = document.createElement('canvas')
   const outCtx = out.getContext('2d', { willReadFrequently: true })!
+  const tmp = document.createElement('canvas')
+  const tmpCtx = tmp.getContext('2d', { willReadFrequently: true })!
 
   // trecho a exportar (trim) + velocidade
   const speed = opts.speed ?? 1
@@ -492,13 +521,30 @@ export async function webmToGif(
     if (scale < 1) {
       fw = Math.max(1, Math.round(composed.width * scale))
       fh = Math.max(1, Math.round(composed.height * scale))
-      out.width = fw
-      out.height = fh
-      outCtx.clearRect(0, 0, fw, fh)
-      outCtx.imageSmoothingEnabled = true
-      outCtx.imageSmoothingQuality = 'high'
-      outCtx.drawImage(canvas, 0, 0, composed.width, composed.height, 0, 0, fw, fh)
-      return { data: outCtx.getImageData(0, 0, fw, fh).data, fw, fh }
+      // downscale em saltos de ~2× (step-down) em vez de um salto bilinear só:
+      // preserva mais detalhe de texto/borda. Ping-pong entre out/tmp pra nunca
+      // ler e escrever o mesmo canvas no mesmo draw.
+      const pool = [{ c: out, x: outCtx }, { c: tmp, x: tmpCtx }]
+      let curC: HTMLCanvasElement = canvas
+      let curX = outCtx
+      let curW = composed.width
+      let curH = composed.height
+      for (const s of halvingSteps(composed.width, composed.height, fw, fh)) {
+        const dst = pool.find((p) => p.c !== curC)!
+        dst.c.width = s.w
+        dst.c.height = s.h
+        dst.x.clearRect(0, 0, s.w, s.h)
+        dst.x.imageSmoothingEnabled = true
+        dst.x.imageSmoothingQuality = 'high'
+        dst.x.drawImage(curC, 0, 0, curW, curH, 0, 0, s.w, s.h)
+        curC = dst.c
+        curX = dst.x
+        curW = s.w
+        curH = s.h
+      }
+      // unsharp recupera a nitidez de borda perdida na redução
+      const data = unsharpMask(curX.getImageData(0, 0, fw, fh).data, fw, fh)
+      return { data, fw, fh }
     }
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!
     return { data: ctx.getImageData(0, 0, fw, fh).data, fw, fh }

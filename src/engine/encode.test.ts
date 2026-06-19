@@ -13,7 +13,44 @@ import {
   autoScale,
   DEFAULT_MAX_DIMENSION,
   DELTA_THRESHOLD,
+  NEAR_SNAP_DIST2,
 } from './encode'
+
+/** Preenche um buffer RGBA w×h com uma cor sólida. */
+function solidRGBA(w: number, h: number, r: number, g: number, b: number): Uint8ClampedArray {
+  const rgba = new Uint8ClampedArray(w * h * 4)
+  for (let p = 0; p < w * h; p++) {
+    rgba[p * 4] = r
+    rgba[p * 4 + 1] = g
+    rgba[p * 4 + 2] = b
+    rgba[p * 4 + 3] = 255
+  }
+  return rgba
+}
+
+describe('applyPaletteOrdered — near-hit snapping (fundo chapado limpo)', () => {
+  it('cor que encosta na paleta mapeia igual em toda posição (sem grão de dither)', () => {
+    // (24,23,22) → dist² a [20,20,20] = 16+9+4 = 29 ≤ NEAR_SNAP_DIST2 → snap
+    expect(29).toBeLessThanOrEqual(NEAR_SNAP_DIST2)
+    const palette = [[20, 20, 20], [40, 40, 40]]
+    const idx = applyPaletteOrdered(solidRGBA(8, 8, 24, 23, 22), palette, 8, 8)
+    expect(new Set(idx)).toEqual(new Set([0])) // uniforme: zero grão
+  })
+
+  it('cor distante da paleta (gradiente real) ainda recebe dither (varia por posição)', () => {
+    // (30,30,30) com paleta [0]/[60]: dist² = 2700 > NEAR_SNAP_DIST2 → dither
+    expect(2700).toBeGreaterThan(NEAR_SNAP_DIST2)
+    const palette = [[0, 0, 0], [60, 60, 60]]
+    const idx = applyPaletteOrdered(solidRGBA(8, 8, 30, 30, 30), palette, 8, 8)
+    expect(new Set(idx).size).toBe(2) // Bayer alterna entre as duas cores
+  })
+
+  it('acerto exato segue mapeando direto', () => {
+    const palette = [[20, 20, 20], [40, 40, 40]]
+    const idx = applyPaletteOrdered(solidRGBA(4, 4, 40, 40, 40), palette, 4, 4)
+    expect(new Set(idx)).toEqual(new Set([1]))
+  })
+})
 
 describe('sampleFrameIndices', () => {
   it('devolve todos os frames quando há menos que o teto', () => {
