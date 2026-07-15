@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { startRecording, type Recording, type RecordingSession } from './engine'
 import Accordion from './components/Accordion'
 import Footer from './components/Footer'
+import FeedbackLink from './components/FeedbackLink'
 import Editor from './components/Editor'
 import { formatElapsed } from './format'
 import './App.css'
@@ -89,6 +90,7 @@ function App() {
   return (
     <div className="app">
       <section className="recorder">
+        <FeedbackLink />
         <div className="hero">
           <div className="hero__heading">
             <h1 className="hero__title">Recorder Awesome</h1>

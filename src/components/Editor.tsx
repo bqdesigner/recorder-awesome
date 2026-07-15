@@ -14,6 +14,7 @@ import { exportFilename } from '../format'
 import Accordion from './Accordion'
 import ColorPicker from './ColorPicker'
 import Footer from './Footer'
+import FeedbackLink from './FeedbackLink'
 import DualRange from './DualRange'
 import '../App.css'
 import './Editor.css'
@@ -359,6 +360,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
 
       {/* bloco de gravação */}
       <section className="recorder">
+        <FeedbackLink />
         <div
           className={`stage${cropMode || busy ? '' : ' clickable'}${
             scene.background === 'transparent' ? ' checker' : ''
