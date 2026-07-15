@@ -15,12 +15,14 @@
 /* marcador de posição da animação */
 .dual-playhead {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: #fff;
-  border-radius: 1px;
-  transform: translateX(-1px);
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #ff3b30;
+  border: 2px solid var(--ink);
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
 }
 
 .dual-track,

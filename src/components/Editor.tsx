@@ -79,6 +79,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [exportState, setExportState] = useState<ExportState>({ kind: 'idle' })
 
   const trimRef = useRef({ start: 0, end: estDuration })
+  // guarda se a reprodução estava rolando ao iniciar o scrub, pra retomar no release
+  const wasPlaying = useRef(false)
   // dithering ordenado (Bayer): quebra o banding em gradientes (qualidade
   // próxima do gifcap), mas com limiar fixo por posição → determinístico e
   // estável entre frames, sem o flicker do Floyd–Steinberg.
@@ -403,6 +405,13 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
             onStart={changeStart}
             onEnd={changeEnd}
             current={playhead}
+            onScrubStart={() => {
+              wasPlaying.current = playing
+              setPlaying(false)
+            }}
+            onScrubEnd={() => {
+              if (wasPlaying.current) setPlaying(true)
+            }}
             onSeek={(t) => {
               setPlayhead(t)
               seek(t)

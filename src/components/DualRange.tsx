@@ -14,6 +14,10 @@ interface Props {
   current?: number | null
   /** Clique/arrasto em qualquer ponto da timeline. */
   onSeek?: (t: number) => void
+  /** Início do scrub (pointer down na timeline). */
+  onScrubStart?: () => void
+  /** Fim do scrub (release). */
+  onScrubEnd?: () => void
 }
 
 /** Timeline com dois controles (início/fim) e scrub livre. */
@@ -27,6 +31,8 @@ function DualRange({
   onEnd,
   current,
   onSeek,
+  onScrubStart,
+  onScrubEnd,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
@@ -44,13 +50,16 @@ function DualRange({
     if (!onSeek || (e.target as HTMLElement).tagName === 'INPUT') return
     scrubbing.current = true
     ref.current!.setPointerCapture(e.pointerId)
+    onScrubStart?.()
     onSeek(timeAt(e))
   }
   function onPointerMove(e: React.PointerEvent) {
     if (scrubbing.current && onSeek) onSeek(timeAt(e))
   }
   function onPointerUp() {
+    if (!scrubbing.current) return
     scrubbing.current = false
+    onScrubEnd?.()
   }
 
   return (
