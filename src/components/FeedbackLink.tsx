@@ -9,7 +9,7 @@ function FeedbackLink() {
       target="_blank"
       rel="noreferrer"
     >
-      📣 Dar feedback
+      📣 Enviar feedback
     </a>
   )
 }
