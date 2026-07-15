@@ -185,6 +185,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
       const { start, end } = trimRef.current
       if (v.currentTime >= end - 0.02 || v.currentTime < start) v.currentTime = start
       drawRef.current()
+      setPlayhead(v.currentTime)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -401,9 +402,8 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
             end={trimEnd}
             onStart={changeStart}
             onEnd={changeEnd}
-            current={playing ? null : playhead}
+            current={playhead}
             onSeek={(t) => {
-              setPlaying(false)
               setPlayhead(t)
               seek(t)
             }}

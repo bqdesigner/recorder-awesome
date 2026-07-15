@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { timeToPct } from '../timeline'
 import './DualRange.css'
 
 interface Props {
@@ -68,7 +69,7 @@ function DualRange({
       {current != null && (
         <div
           className="dual-playhead"
-          style={{ left: `${((current - min) / span) * 100}%` }}
+          style={{ left: `${timeToPct(current, min, max)}%` }}
         />
       )}
       <input
