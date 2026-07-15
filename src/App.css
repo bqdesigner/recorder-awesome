@@ -35,6 +35,18 @@
   overflow: hidden;
 }
 
+/* ---- link de feedback (topo-esquerda, alinhado ao rodapé) ---- */
+.recorder__feedback {
+  position: absolute;
+  left: 10px;
+  top: 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-decoration: underline;
+}
+
 /* ---- rodapé do bloco de gravação ---- */
 .recorder__footer {
   position: absolute;
