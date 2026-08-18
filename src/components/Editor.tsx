@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import {
   webmToGif,
   webmToMp4,
+  MP4_MAX_DIMENSION,
+  MP4_FPS,
+  mp4OutputSize,
+  mp4Bitrate,
   compose,
   composedSize,
   autoScale,
@@ -78,6 +82,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [open, setOpen] = useState<Section | null>('format')
   const [maxUnlocked, setMaxUnlocked] = useState(0) // 0=format, 1=export
   const [exportState, setExportState] = useState<ExportState>({ kind: 'idle' })
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const trimRef = useRef({ start: 0, end: estDuration })
   // guarda se a reprodução estava rolando ao iniciar o scrub, pra retomar no release
@@ -286,10 +291,25 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   }
 
   // Resolve a escala efetiva: 'auto' → fator que limita a maior dimensão da
-  // saída a DEFAULT_MAX_DIMENSION; número → ele mesmo. Usado no export e na
+  // saída ao teto do formato; número → ele mesmo. Usado no export e na
   // estimativa pra que o número exibido reflita a resolução realmente gerada.
-  const resolveScale = (w: number, h: number) =>
-    scale === 'auto' ? autoScale(w, h) : scale
+  const resolveScale = (w: number, h: number, maxDim?: number) =>
+    scale === 'auto' ? autoScale(w, h, maxDim) : scale
+
+  // Cena composta no tamanho de origem (moldura/respiro entram na conta, não só
+  // o vídeo recortado) + escala já resolvida contra o teto do formato. Base
+  // comum do export e das estimativas: o número exibido tem que sair da mesma
+  // conta que gera o arquivo.
+  function outputPlan(exportScene: Scene, maxDim?: number) {
+    if (!dims) return null
+    const srcW = crop ? crop.w * dims.w : dims.w
+    const srcH = crop ? crop.h * dims.h : dims.h
+    const { width, height } = composedSize(exportScene, srcW, srcH)
+    return { width, height, scale: resolveScale(width, height, maxDim) }
+  }
+
+  const outputScale = (exportScene: Scene, maxDim?: number) =>
+    outputPlan(exportScene, maxDim)?.scale ?? (typeof scale === 'number' ? scale : 1)
 
   // --- exportação (baixar / copiar) ---
   async function runExport() {
@@ -307,46 +327,59 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     }
     const onProgress = (p: number) =>
       setExportState((s) => (s.kind === 'download' ? { ...s, progress: p } : s))
-    if (format === 'mp4') return webmToMp4(blob, duration, { ...opts, onProgress })
-
-    let outScale = typeof scale === 'number' ? scale : 1
-    if (dims) {
-      const srcW = crop ? crop.w * dims.w : dims.w
-      const srcH = crop ? crop.h * dims.h : dims.h
-      const { width, height } = composedSize(exportScene, srcW, srcH)
-      outScale = resolveScale(width, height)
+    if (format === 'mp4') {
+      const outScale = outputScale(exportScene, MP4_MAX_DIMENSION)
+      return webmToMp4(blob, duration, { ...opts, onProgress, scale: outScale })
     }
-    return webmToGif(blob, duration, { ...opts, onProgress, fps, scale: outScale, dither })
+
+    return webmToGif(blob, duration, {
+      ...opts,
+      onProgress,
+      fps,
+      scale: outputScale(exportScene),
+      dither,
+    })
   }
 
   async function handleDownload() {
     setExportState({ kind: 'download', progress: 0 })
+    setExportError(null)
     try {
       const out = await runExport()
       download(out, exportFilename(format === 'mp4' ? 'mp4' : 'gif'))
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Falha ao exportar')
     } finally {
       setExportState({ kind: 'idle' })
     }
   }
 
+  /** Duração do arquivo gerado (s): trecho do trim já ajustado pela velocidade. */
+  const outSpan = Math.max(0, (trimEnd - trimStart) / speed)
+
   // dimensões e tamanho estimado da saída GIF
   function gifEstimate() {
-    if (!dims) return null
-    const vw = dims.w
-    const vh = dims.h
-    const srcW = crop ? crop.w * vw : vw
-    const srcH = crop ? crop.h * vh : vh
-    const { width, height } = composedSize(scene, srcW, srcH)
-    const s = resolveScale(width, height)
-    const ow = Math.max(1, Math.round(width * s))
-    const oh = Math.max(1, Math.round(height * s))
-    const span = Math.max(0, (trimEnd - trimStart) / speed)
-    const frames = Math.max(1, Math.round(span * fps))
+    const plan = outputPlan(scene)
+    if (!plan) return null
+    const ow = Math.max(1, Math.round(plan.width * plan.scale))
+    const oh = Math.max(1, Math.round(plan.height * plan.scale))
+    const frames = Math.max(1, Math.round(outSpan * fps))
     const mb = (frames * ow * oh * GIF_BYTES_PER_PX) / 1e6
     return { ow, oh, frames, mb }
   }
 
-  const est = format === 'gif' ? gifEstimate() : null
+  // Idem pro MP4, mas o peso sai do bitrate alvo do encoder (bits/s × duração)
+  // em vez de uma heurística por pixel: aqui quem manda no tamanho é o bitrate.
+  function mp4Estimate() {
+    const plan = outputPlan(scene, MP4_MAX_DIMENSION)
+    if (!plan) return null
+    const { width: ow, height: oh } = mp4OutputSize(plan.width, plan.height, plan.scale)
+    const frames = Math.max(1, Math.round(outSpan * MP4_FPS))
+    const mb = (mp4Bitrate(ow, oh) * outSpan) / 8 / 1e6
+    return { ow, oh, frames, mb }
+  }
+
+  const est = format === 'gif' ? gifEstimate() : mp4Estimate()
   const showEstimate = (open === 'format' || open === 'export') && est
 
   const overlayText =
@@ -592,7 +625,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                   onChange={(e) =>
                     setScale(e.target.value === 'auto' ? 'auto' : +e.target.value)
                   }
-                  disabled={format !== 'gif'}
                 >
                   <option value="auto">Auto</option>
                   <option value={1}>100% - High quality</option>
@@ -602,6 +634,12 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
             </fieldset>
           </Accordion>
         </div>
+
+        {exportError && (
+          <p className="export-error" role="alert">
+            {exportError}
+          </p>
+        )}
 
         {/* ações inferiores, conforme a seção aberta */}
         <div className="panel__actions">
