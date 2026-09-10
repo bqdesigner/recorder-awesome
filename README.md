@@ -4,6 +4,8 @@ Grava tela no browser, edita (trim/crop), formata dentro de moldura (celular/not
 
 Alternativa ao gifcap.dev com personalização (mockups) e saída em MP4.
 
+![Tela inicial do Recorder Awesome](docs/home.jpg)
+
 ## Stack
 - React + Vite + TypeScript
 - Captura: `getDisplayMedia`

@@ -1,19 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { startRecording, type Recording, type RecordingSession } from './engine'
-import Accordion from './components/Accordion'
+import TopBar from './components/TopBar'
 import Footer from './components/Footer'
-import FeedbackLink from './components/FeedbackLink'
 import Editor from './components/Editor'
 import { formatElapsed } from './format'
 import './App.css'
 
 type Status = 'idle' | 'recording' | 'recorded'
-type Section = 'format' | 'export'
 
 function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [previewUrl, setPreviewUrl] = useState('')
-  const [open, setOpen] = useState<Section | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const sessionRef = useRef<RecordingSession | null>(null)
   const recordingRef = useRef<Recording | null>(null)
@@ -68,7 +65,6 @@ function App() {
     sessionRef.current = null
     recordingRef.current = null
     setPreviewUrl('')
-    setOpen(null)
     setStatus('idle')
   }
 
@@ -83,106 +79,66 @@ function App() {
     )
   }
 
-  // estado vazio / gravando: hero à esquerda, accordions desabilitados à direita
-  const toggle = (s: Section) => setOpen((cur) => (cur === s ? null : s))
   const recording = status === 'recording'
 
   return (
     <div className="app">
-      <section className="recorder">
-        <FeedbackLink />
+      <TopBar />
+
+      <main className="landing">
         <div className="hero">
-          <div className="hero__heading">
-            <h1 className="hero__title">Recorder Awesome</h1>
-            <p className="hero__sub">
-              Grave sua tela - deixe ela incrível - compartilhe no seu projeto
-            </p>
-          </div>
-          <div className="hero__record">
+          <h1 className="hero__title">Recorder Awesome</h1>
+          <p className="hero__sub">
+            Grave, edite e compartilhe no seu projeto.
+          </p>
+
+          <div className={`hero__record${recording ? ' is-recording' : ''}`}>
             <button
               type="button"
-              className="btn btn--solid btn--hero"
+              className={`rec-btn${recording ? ' is-recording' : ''}`}
               onClick={recording ? finishRecording : handleStart}
             >
-              {recording && <span className="live-dot" aria-hidden />}
+              <span className="rec-btn__dot" aria-hidden />
               {recording ? 'Parar gravação' : 'Gravar tela'}
             </button>
             {recording && (
               <p className="hero__timer" role="timer" aria-label="Tempo de gravação">
+                <span className="hero__timer-label">Gravando</span>
                 {formatElapsed(elapsed)}
               </p>
             )}
           </div>
         </div>
-        <Footer />
-      </section>
 
-      <aside className="panel">
-        <div className="panel__content">
-          <Accordion
-            title="Formatar"
-            open={open === 'format'}
-            onToggle={() => toggle('format')}
-          >
-            <div className="section-body">
-              <div className="field field--check" aria-disabled>
-                <input type="checkbox" disabled />
-                <span>Adicionar respiro</span>
+        {!recording && (
+          <ol className="steps">
+            <li className="step">
+              <span className="step__num">1</span>
+              <div>
+                <strong>Grave</strong>
+                <p>Escolha tela, janela ou aba. Nada pra instalar.</p>
               </div>
-              <div className="field field--select" aria-disabled>
-                <span>Nenhuma</span>
-                <Chevron />
+            </li>
+            <li className="step">
+              <span className="step__num">2</span>
+              <div>
+                <strong>Formate</strong>
+                <p>Corte, moldura de celular ou notebook e fundo na sua cor.</p>
               </div>
-              <div className="segment is-disabled">
-                <span className="segment__item segment__item--active">Fit</span>
-                <span className="segment__item">Fill</span>
+            </li>
+            <li className="step">
+              <span className="step__num">3</span>
+              <div>
+                <strong>Exporte</strong>
+                <p>GIF pra chat e docs, MP4 pra vídeo. Tudo fica no seu dispositivo.</p>
               </div>
-              <div className="field" aria-disabled>
-                <span>
-                  Cor de fundo <span className="muted">– Transparente</span>
-                </span>
-                <span className="swatch swatch--checker" />
-              </div>
-            </div>
-          </Accordion>
+            </li>
+          </ol>
+        )}
+      </main>
 
-          <Accordion
-            title="Exportar"
-            open={open === 'export'}
-            onToggle={() => toggle('export')}
-          >
-            <div className="section-body">
-              <div className="segment is-disabled">
-                <span className="segment__item segment__item--active">GIF</span>
-                <span className="segment__item">MP4</span>
-              </div>
-              <div className="row">
-                <div className="field" aria-disabled>
-                  <span>1x</span>
-                  <Chevron />
-                </div>
-                <div className="field" aria-disabled>
-                  <span>15 FPS</span>
-                  <Chevron />
-                </div>
-                <div className="field field--res" aria-disabled>
-                  <span>Resolução</span>
-                  <Chevron />
-                </div>
-              </div>
-            </div>
-          </Accordion>
-        </div>
-      </aside>
+      <Footer />
     </div>
-  )
-}
-
-function Chevron() {
-  return (
-    <svg width="12" height="6" viewBox="0 0 12 6" fill="none" aria-hidden>
-      <path d="M1 1l5 4 5-4" stroke="#191819" strokeWidth="1.5" />
-    </svg>
   )
 }
 

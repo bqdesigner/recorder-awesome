@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { exportFilename, formatElapsed } from './format'
+import { exportFilename, formatClock, formatElapsed } from './format'
+
+describe('formatClock', () => {
+  it('formata zero com décimo', () => {
+    expect(formatClock(0)).toBe('0:00.0')
+  })
+
+  it('trunca para décimos', () => {
+    expect(formatClock(5.26)).toBe('0:05.2')
+  })
+
+  it('minutos, segundos e décimos', () => {
+    expect(formatClock(83.9)).toBe('1:23.9')
+  })
+
+  it('não arredonda 59.99 para 1:00', () => {
+    expect(formatClock(59.99)).toBe('0:59.9')
+  })
+
+  it('trata negativo como zero', () => {
+    expect(formatClock(-2)).toBe('0:00.0')
+  })
+})
 
 describe('formatElapsed', () => {
   it('formata zero', () => {
