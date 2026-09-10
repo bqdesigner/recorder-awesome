@@ -8,11 +8,11 @@ interface Props {
   /** Estado/opção de transparência (só quando faz sentido, ex: fundo). */
   transparent?: boolean
   onTransparent?: () => void
-  /** Desabilita a amostra (não abre o popover). */
+  /** Desabilita o gatilho (não abre o popover). */
   disabled?: boolean
 }
 
-/** Amostra de cor com popover: opção transparente + entrada manual em hex. */
+/** Amostra de cor + hex visível; popover com opção transparente, hex manual e seletor nativo. */
 function ColorPicker({ value, onChange, transparent, onTransparent, disabled }: Props) {
   const [open, setOpen] = useState(false)
   const [hex, setHex] = useState(value.replace('#', ''))
@@ -23,8 +23,15 @@ function ColorPicker({ value, onChange, transparent, onTransparent, disabled }: 
     const onDoc = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   function commit(raw: string) {
@@ -39,19 +46,25 @@ function ColorPicker({ value, onChange, transparent, onTransparent, disabled }: 
     <div className="cp" ref={ref}>
       <button
         type="button"
-        className={`swatch${transparent ? ' swatch--checker' : ''}`}
-        style={transparent ? undefined : { background: value }}
+        className="cp__trigger"
         disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         onClick={() =>
           setOpen((o) => {
             if (!o) setHex(value.replace('#', ''))
             return !o
           })
         }
-        aria-label="Escolher cor"
-      />
+      >
+        <span
+          className={`swatch${transparent ? ' swatch--checker' : ''}`}
+          style={transparent ? undefined : { background: value }}
+        />
+        <span className="cp__value">{transparent ? 'Transparente' : value.toUpperCase()}</span>
+      </button>
       {open && (
-        <div className="cp__pop">
+        <div className="cp__pop" role="dialog" aria-label="Escolher cor">
           {onTransparent && (
             <button
               type="button"
@@ -74,6 +87,7 @@ function ColorPicker({ value, onChange, transparent, onTransparent, disabled }: 
               spellCheck={false}
               placeholder="000000"
               inputMode="text"
+              aria-label="Cor em hexadecimal"
             />
           </label>
           <input

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   webmToGif,
   webmToMp4,
@@ -14,13 +14,22 @@ import {
   type Scene,
   type Fit,
 } from '../engine'
-import { exportFilename } from '../format'
-import Accordion from './Accordion'
+import { exportFilename, formatClock } from '../format'
+import TopBar from './TopBar'
 import ColorPicker from './ColorPicker'
-import Footer from './Footer'
-import FeedbackLink from './FeedbackLink'
 import DualRange from './DualRange'
-import '../App.css'
+import Segmented from './Segmented'
+import Switch from './Switch'
+import {
+  PlayIcon,
+  PauseIcon,
+  ScissorsIcon,
+  CheckIcon,
+  TrashIcon,
+  DownloadIcon,
+  RefreshIcon,
+  FrameIcon,
+} from './icons'
 import './Editor.css'
 
 interface Props {
@@ -40,7 +49,6 @@ const MIN_CROP = 0.02 // recortes menores que isso = limpar
 // gravações com mais movimento. Aproximação — varia com a quantidade de mudança.
 const GIF_BYTES_PER_PX = 0.025
 
-type Section = 'format' | 'export'
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
 type Drag =
   | { mode: 'new'; ox: number; oy: number } // âncora = ponto inicial
@@ -49,8 +57,7 @@ type Drag =
 
 type ExportState = { kind: 'idle' } | { kind: 'download'; progress: number }
 
-// ordem das seções para o gating sequencial (formatar → exportar)
-const ORDER: Section[] = ['format', 'export']
+const FRAME_OPTIONS = [{ id: 'none', label: 'Nenhuma' }, ...FRAMES.map((f) => ({ id: f.id, label: f.label }))]
 
 function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -78,9 +85,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [ready, setReady] = useState(false)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
 
-  // navegação: qual seção está aberta + até onde o fluxo foi liberado
-  const [open, setOpen] = useState<Section | null>('format')
-  const [maxUnlocked, setMaxUnlocked] = useState(0) // 0=format, 1=export
   const [exportState, setExportState] = useState<ExportState>({ kind: 'idle' })
   const [exportError, setExportError] = useState<string | null>(null)
 
@@ -92,7 +96,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   // estável entre frames, sem o flicker do Floyd–Steinberg.
   const dither = 'ordered' as const
 
-  const unlocked = (s: Section) => ORDER.indexOf(s) <= maxUnlocked
   const busy = exportState.kind === 'download'
 
   const frame = frameId === 'none' ? null : FRAMES.find((f) => f.id === frameId) ?? null
@@ -166,10 +169,10 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     }
   }, [])
 
-  // redesenha ao mudar recorte / moldura / background / encaixe / seção
+  // redesenha ao mudar recorte / moldura / background / encaixe
   useEffect(() => {
     drawRef.current()
-  }, [crop, cropMode, frameId, addRespiro, background, bgTransparent, screenFill, fit, open])
+  }, [crop, cropMode, frameId, addRespiro, background, bgTransparent, screenFill, fit])
 
   useEffect(() => {
     trimRef.current = { start: trimStart, end: trimEnd }
@@ -192,6 +195,9 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     const tick = () => {
       const { start, end } = trimRef.current
       if (v.currentTime >= end - 0.02 || v.currentTime < start) v.currentTime = start
+      // ao bater no fim real do arquivo o browser pausa ('ended') e um seek não
+      // retoma sozinho: religa a reprodução pra manter o loop
+      if (v.paused) v.play().catch(() => {})
       drawRef.current()
       setPlayhead(v.currentTime)
       raf = requestAnimationFrame(tick)
@@ -199,6 +205,19 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [playing, ready])
+
+  // barra de espaço alterna play/pause quando o foco não está num controle
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || cropMode || busy) return
+      const t = e.target as HTMLElement | null
+      if (t?.closest('input, select, textarea, button, a, [contenteditable]')) return
+      e.preventDefault()
+      setPlaying((p) => !p)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cropMode, busy])
 
   function seek(t: number) {
     if (videoRef.current) videoRef.current.currentTime = t
@@ -280,16 +299,6 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
     setCrop((c) => (c && c.w > MIN_CROP && c.h > MIN_CROP ? c : null))
   }
 
-  // --- navegação entre seções ---
-  function toggle(s: Section) {
-    setOpen((cur) => (cur === s ? null : s))
-  }
-  function advance(to: Section) {
-    setCropMode(false)
-    setMaxUnlocked((m) => Math.max(m, ORDER.indexOf(to)))
-    setOpen(to)
-  }
-
   // Resolve a escala efetiva: 'auto' → fator que limita a maior dimensão da
   // saída ao teto do formato; número → ele mesmo. Usado no export e na
   // estimativa pra que o número exibido reflita a resolução realmente gerada.
@@ -311,7 +320,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const outputScale = (exportScene: Scene, maxDim?: number) =>
     outputPlan(exportScene, maxDim)?.scale ?? (typeof scale === 'number' ? scale : 1)
 
-  // --- exportação (baixar / copiar) ---
+  // --- exportação ---
   async function runExport() {
     // MP4 não suporta transparência: fundo transparente vira branco no vídeo.
     const exportScene: Scene =
@@ -342,6 +351,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   }
 
   async function handleDownload() {
+    setCropMode(false)
     setExportState({ kind: 'download', progress: 0 })
     setExportError(null)
     try {
@@ -380,177 +390,221 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   }
 
   const est = format === 'gif' ? gifEstimate() : mp4Estimate()
-  const showEstimate = (open === 'format' || open === 'export') && est
-
-  const overlayText =
-    exportState.kind === 'download'
-      ? `${Math.round(exportState.progress * 100)}% Baixando...`
-      : null
+  const progressPct = exportState.kind === 'download' ? Math.round(exportState.progress * 100) : 0
 
   return (
     <div className="app">
       <video ref={videoRef} src={previewUrl} muted playsInline className="source" />
 
-      {/* bloco de gravação */}
-      <section className="recorder">
-        <FeedbackLink />
-        <div
-          className={`stage${cropMode || busy ? '' : ' clickable'}${
-            scene.background === 'transparent' ? ' checker' : ''
-          }`}
-          onClick={() => {
-            if (!cropMode && !busy) setPlaying((p) => !p)
-          }}
-        >
-          <canvas ref={canvasRef} className="preview" />
-          {!playing && !cropMode && !overlayText && <div className="play-overlay">▶</div>}
-          <div
-            ref={overlayRef}
-            className={`crop-layer${cropMode ? ' active' : ''}`}
-            onPointerDown={cropMode ? onPointerDown : undefined}
-            onPointerMove={cropMode ? onPointerMove : undefined}
-            onPointerUp={cropMode ? onPointerUp : undefined}
-          >
-            {cropMode && crop && (
+      <TopBar>
+        <button type="button" className="btn" onClick={onReset} disabled={busy}>
+          <RefreshIcon />
+          <span className="btn__label">Nova gravação</span>
+        </button>
+      </TopBar>
+
+      <div className="editor">
+        {/* palco: preview + transporte */}
+        <section className="stage-col">
+          <div className="stage-wrap">
+            <div
+              className={`stage${cropMode || busy ? '' : ' clickable'}${
+                scene.background === 'transparent' && !cropMode ? ' checker' : ''
+              }`}
+              onClick={() => {
+                if (!cropMode && !busy) setPlaying((p) => !p)
+              }}
+            >
+              <canvas ref={canvasRef} className="preview" />
+              {!playing && !cropMode && !busy && (
+                <div className="play-overlay">
+                  <span className="play-overlay__badge">
+                    <PlayIcon />
+                  </span>
+                </div>
+              )}
               <div
-                className="crop-rect"
-                style={{
-                  left: `${crop.x * 100}%`,
-                  top: `${crop.y * 100}%`,
-                  width: `${crop.w * 100}%`,
-                  height: `${crop.h * 100}%`,
-                }}
+                ref={overlayRef}
+                className={`crop-layer${cropMode ? ' active' : ''}`}
+                onPointerDown={cropMode ? onPointerDown : undefined}
+                onPointerMove={cropMode ? onPointerMove : undefined}
+                onPointerUp={cropMode ? onPointerUp : undefined}
               >
-                <span className="handle nw" />
-                <span className="handle ne" />
-                <span className="handle sw" />
-                <span className="handle se" />
+                {cropMode && crop && (
+                  <div
+                    className="crop-rect"
+                    style={{
+                      left: `${crop.x * 100}%`,
+                      top: `${crop.y * 100}%`,
+                      width: `${crop.w * 100}%`,
+                      height: `${crop.h * 100}%`,
+                    }}
+                  >
+                    <span className="handle nw" />
+                    <span className="handle ne" />
+                    <span className="handle sw" />
+                    <span className="handle se" />
+                  </div>
+                )}
               </div>
-            )}
+              {busy && (
+                <div className="stage__overlay" role="status">
+                  <span className="spinner" aria-hidden />
+                  <span>Exportando {format.toUpperCase()} · {progressPct}%</span>
+                </div>
+              )}
+            </div>
           </div>
-          {overlayText && <div className="stage__overlay">{overlayText}</div>}
-        </div>
 
-        <div className="timeline-row">
-          <DualRange
-            min={0}
-            max={duration}
-            start={trimStart}
-            end={trimEnd}
-            onStart={changeStart}
-            onEnd={changeEnd}
-            current={playhead}
-            onScrubStart={() => {
-              wasPlaying.current = playing
-              setPlaying(false)
-            }}
-            onScrubEnd={() => {
-              if (wasPlaying.current) setPlaying(true)
-            }}
-            onSeek={(t) => {
-              setPlayhead(t)
-              seek(t)
-            }}
-          />
-          <div className="crop-tools">
-            {!cropMode ? (
+          <div className="transport">
+            <div className="transport__row">
               <button
-                className="crop-btn"
-                title="Recortar"
-                aria-label="Recortar"
-                onClick={() => setCropMode(true)}
-                disabled={busy}
+                type="button"
+                className="btn btn--icon"
+                aria-label={playing ? 'Pausar' : 'Reproduzir'}
+                title={playing ? 'Pausar (espaço)' : 'Reproduzir (espaço)'}
+                onClick={() => setPlaying((p) => !p)}
+                disabled={cropMode || busy}
               >
-                <ScissorsIcon />
+                {playing ? <PauseIcon /> : <PlayIcon />}
               </button>
-            ) : (
-              <>
-                <button
-                  className="crop-btn"
-                  title="Confirmar corte"
-                  aria-label="Confirmar corte"
-                  onClick={() => setCropMode(false)}
-                >
-                  <CheckIcon />
-                </button>
-                <button
-                  className="crop-btn"
-                  title="Limpar corte"
-                  aria-label="Limpar corte"
-                  onClick={() => {
-                    setCrop(null)
-                    setCropMode(false)
+
+              <span className="clock" aria-live="off">
+                {formatClock(playhead)}
+                <span className="clock__sep">/</span>
+                <span className="clock__total">{formatClock(trimEnd - trimStart)}</span>
+              </span>
+
+              <div className="transport__timeline">
+                <DualRange
+                  min={0}
+                  max={duration}
+                  start={trimStart}
+                  end={trimEnd}
+                  onStart={changeStart}
+                  onEnd={changeEnd}
+                  current={playhead}
+                  onScrubStart={() => {
+                    wasPlaying.current = playing
+                    setPlaying(false)
                   }}
-                >
-                  <TrashIcon />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {showEstimate && (
-          <p className="estimate">
-            {est!.ow}×{est!.oh}px · {est!.frames} frames · ~{est!.mb.toFixed(1)} MB
-            (estimativa)
-          </p>
-        )}
-
-        <Footer />
-      </section>
-
-      {/* bloco de edição */}
-      <aside className="panel">
-        <div className="panel__content">
-          {/* Formatar */}
-          <Accordion
-            title="Formatar"
-            open={open === 'format'}
-            onToggle={() => toggle('format')}
-          >
-            <fieldset className="section-body" disabled={!unlocked('format')}>
-              <label className="field field--check">
-                <input
-                  type="checkbox"
-                  checked={addRespiro}
-                  onChange={(e) => setAddRespiro(e.target.checked)}
+                  onScrubEnd={() => {
+                    if (wasPlaying.current) setPlaying(true)
+                  }}
+                  onSeek={(t) => {
+                    setPlayhead(t)
+                    seek(t)
+                  }}
                 />
-                <span>Adicionar respiro</span>
-              </label>
-
-              <select
-                className="field field--select"
-                value={frameId}
-                onChange={(e) => setFrameId(e.target.value)}
-              >
-                <option value="none">Nenhuma</option>
-                {FRAMES.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
-
-              <div className="segment">
-                <button
-                  className={`segment__item${fit === 'fit' ? ' segment__item--active' : ''}`}
-                  onClick={() => setFit('fit')}
-                >
-                  Fit
-                </button>
-                <button
-                  className={`segment__item${fit === 'fill' ? ' segment__item--active' : ''}`}
-                  onClick={() => setFit('fill')}
-                >
-                  Fill
-                </button>
               </div>
 
-              <div className="field field--color">
-                <span>
-                  Cor de fundo{' '}
-                  {bgTransparent && <span className="muted">– Transparente</span>}
-                </span>
+              <div className="crop-tools">
+                {!cropMode ? (
+                  <button
+                    type="button"
+                    className={`btn${crop ? ' is-marked' : ''}`}
+                    title="Recortar área"
+                    onClick={() => {
+                      setPlaying(false)
+                      setCropMode(true)
+                    }}
+                    disabled={busy}
+                  >
+                    <ScissorsIcon />
+                    <span className="btn__label">Recortar</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      title="Limpar corte"
+                      onClick={() => {
+                        setCrop(null)
+                        setCropMode(false)
+                      }}
+                    >
+                      <TrashIcon />
+                      <span className="btn__label">Limpar</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      title="Concluir corte"
+                      onClick={() => setCropMode(false)}
+                    >
+                      <CheckIcon />
+                      <span className="btn__label">Concluir</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <p className="transport__hint">
+              {cropMode
+                ? 'Arraste sobre o vídeo para escolher a área. Puxe os cantos para ajustar ou mova a seleção.'
+                : 'Arraste as alças brancas para cortar início e fim. Clique na linha do tempo para navegar.'}
+            </p>
+          </div>
+        </section>
+
+        {/* inspector: formatar + exportar */}
+        <aside className="inspector">
+          <div className="inspector__scroll">
+            <section className="group">
+              <h2 className="group__title">Formatar</h2>
+
+              <Field label="Moldura">
+                <div className="frame-grid" role="radiogroup" aria-label="Moldura">
+                  {FRAME_OPTIONS.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={frameId === o.id}
+                      className={`frame-opt${frameId === o.id ? ' is-active' : ''}`}
+                      onClick={() => setFrameId(o.id)}
+                    >
+                      <FrameIcon id={o.id} />
+                      <span>{o.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="Encaixe" hint="Como o vídeo ocupa a tela da moldura">
+                <Segmented
+                  ariaLabel="Encaixe"
+                  value={fit}
+                  onChange={setFit}
+                  options={[
+                    { value: 'fit', label: 'Fit', title: 'Mostra o vídeo inteiro' },
+                    { value: 'fill', label: 'Fill', title: 'Preenche a tela, pode cortar bordas' },
+                  ]}
+                />
+              </Field>
+
+              {frame && (
+                <Field
+                  label="Cor da tela"
+                  hint={fit === 'fill' ? 'Sem efeito no Fill' : 'Aparece nas sobras do Fit'}
+                  inline
+                >
+                  <ColorPicker value={screenFill} disabled={fit === 'fill'} onChange={setScreenFill} />
+                </Field>
+              )}
+
+              <Field label="Respiro" hint="Margem em volta da gravação" inline>
+                <Switch ariaLabel="Adicionar respiro" checked={addRespiro} onChange={setAddRespiro} />
+              </Field>
+
+              <Field
+                label="Cor de fundo"
+                hint={addRespiro ? undefined : 'Ative o respiro para usar'}
+                inline
+                disabled={!addRespiro}
+              >
                 <ColorPicker
                   value={background}
                   transparent={addRespiro ? bgTransparent : true}
@@ -561,112 +615,144 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                   }}
                   onTransparent={() => setBgTransparent(true)}
                 />
-              </div>
+              </Field>
+            </section>
 
-              {frame && (
-                <div className="field field--color">
-                  <span>Cor da tela</span>
-                  <ColorPicker
-                    value={screenFill}
-                    disabled={fit === 'fill'}
-                    onChange={setScreenFill}
-                  />
-                </div>
-              )}
-            </fieldset>
-          </Accordion>
+            <section className="group">
+              <h2 className="group__title">Exportar</h2>
 
-          {/* Exportar */}
-          <Accordion
-            title="Exportar"
-            open={open === 'export'}
-            onToggle={() => toggle('export')}
-          >
-            <fieldset className="section-body" disabled={!unlocked('export') || busy}>
-              <div className="segment">
-                <button
-                  className={`segment__item${format === 'gif' ? ' segment__item--active' : ''}`}
-                  onClick={() => setFormat('gif')}
-                >
-                  GIF
-                </button>
-                <button
-                  className={`segment__item${format === 'mp4' ? ' segment__item--active' : ''}`}
-                  onClick={() => setFormat('mp4')}
-                >
-                  MP4
-                </button>
-              </div>
-              <div className="row">
-                <select
-                  className="field field--select"
+              <Segmented
+                ariaLabel="Formato"
+                size="lg"
+                value={format}
+                onChange={setFormat}
+                disabled={busy}
+                options={[
+                  {
+                    value: 'gif',
+                    label: (
+                      <>
+                        <strong>GIF</strong>
+                        <small>Loop · chat e docs</small>
+                      </>
+                    ),
+                  },
+                  {
+                    value: 'mp4',
+                    label: (
+                      <>
+                        <strong>MP4</strong>
+                        <small>Vídeo · mais nítido</small>
+                      </>
+                    ),
+                  },
+                ]}
+              />
+
+              <Field label="Velocidade">
+                <Segmented
+                  ariaLabel="Velocidade"
                   value={speed}
-                  onChange={(e) => setSpeed(+e.target.value)}
-                >
-                  <option value={0.5}>0.5x</option>
-                  <option value={1}>1x</option>
-                  <option value={1.5}>1.5x</option>
-                  <option value={2}>2x</option>
-                </select>
-                <select
-                  className="field field--select"
+                  onChange={setSpeed}
+                  disabled={busy}
+                  options={[
+                    { value: 0.5, label: '0.5×' },
+                    { value: 1, label: '1×' },
+                    { value: 1.5, label: '1.5×' },
+                    { value: 2, label: '2×' },
+                  ]}
+                />
+              </Field>
+
+              <Field
+                label="Quadros por segundo"
+                hint={format === 'mp4' ? `MP4 sai fixo em ${MP4_FPS} fps` : 'Mais fps = mais fluido e mais pesado'}
+                disabled={format !== 'gif'}
+              >
+                <Segmented
+                  ariaLabel="Quadros por segundo"
                   value={fps}
-                  onChange={(e) => setFps(+e.target.value)}
-                  disabled={format !== 'gif'}
-                >
-                  <option value={10}>10 FPS</option>
-                  <option value={15}>15 FPS</option>
-                  <option value={20}>20 FPS</option>
-                  <option value={24}>24 FPS</option>
-                </select>
-                <select
-                  className="field field--select field--res"
+                  onChange={setFps}
+                  disabled={format !== 'gif' || busy}
+                  options={[
+                    { value: 10, label: '10' },
+                    { value: 15, label: '15' },
+                    { value: 20, label: '20' },
+                    { value: 24, label: '24' },
+                  ]}
+                />
+              </Field>
+
+              <Field label="Resolução" hint="Auto limita ao teto do formato">
+                <Segmented
+                  ariaLabel="Resolução"
                   value={scale}
-                  onChange={(e) =>
-                    setScale(e.target.value === 'auto' ? 'auto' : +e.target.value)
-                  }
-                >
-                  <option value="auto">Auto</option>
-                  <option value={1}>100% - High quality</option>
-                  <option value={0.5}>50% - Medium Fidelity</option>
-                </select>
-              </div>
-            </fieldset>
-          </Accordion>
-        </div>
+                  onChange={setScale}
+                  disabled={busy}
+                  options={[
+                    { value: 'auto', label: 'Auto' },
+                    { value: 1, label: '100%', title: 'Alta qualidade' },
+                    { value: 0.5, label: '50%', title: 'Mais leve' },
+                  ]}
+                />
+              </Field>
+            </section>
+          </div>
 
-        {exportError && (
-          <p className="export-error" role="alert">
-            {exportError}
-          </p>
-        )}
-
-        {/* ações inferiores, conforme a seção aberta */}
-        <div className="panel__actions">
-          <button className="btn" onClick={onReset} disabled={busy}>
-            Nova gravação
-          </button>
-
-          {open === 'format' && (
+          <div className="inspector__footer">
+            {est && (
+              <p className="estimate">
+                <span>
+                  {est.ow}×{est.oh}px
+                </span>
+                <span className="estimate__dot">·</span>
+                <span>{est.frames} quadros</span>
+                <span className="estimate__dot">·</span>
+                <span>~{est.mb.toFixed(1)} MB</span>
+                <span className="estimate__note">estimativa</span>
+              </p>
+            )}
+            {exportError && (
+              <p className="export-error" role="alert">
+                {exportError}
+              </p>
+            )}
             <button
-              className="btn"
-              onClick={() => advance('export')}
-              disabled={!unlocked('format')}
-            >
-              Próximo: exportar
-            </button>
-          )}
-          {open === 'export' && (
-            <button
-              className="btn"
+              type="button"
+              className="btn btn--primary btn--block download-btn"
               onClick={handleDownload}
-              disabled={!unlocked('export') || busy}
+              disabled={busy || !ready}
             >
-              Baixar
+              {busy && <span className="download-btn__bar" style={{ width: `${progressPct}%` }} />}
+              <span className="download-btn__label">
+                <DownloadIcon />
+                {busy ? `Exportando ${progressPct}%` : `Baixar ${format.toUpperCase()}`}
+              </span>
             </button>
-          )}
-        </div>
-      </aside>
+          </div>
+        </aside>
+      </div>
+    </div>
+  )
+}
+
+interface FieldProps {
+  label: string
+  hint?: string
+  /** Rótulo e controle na mesma linha (controles compactos: switch, cor). */
+  inline?: boolean
+  disabled?: boolean
+  children: ReactNode
+}
+
+function Field({ label, hint, inline, disabled, children }: FieldProps) {
+  return (
+    <div className={`field${inline ? ' field--inline' : ''}${disabled ? ' is-disabled' : ''}`}>
+      <div className="field__label">
+        <span>{label}</span>
+        {hint && <small>{hint}</small>}
+      </div>
+      <div className="field__control">{children}</div>
     </div>
   )
 }
@@ -677,65 +763,6 @@ function clamp01(n: number) {
 
 function inside(p: { x: number; y: number }, c: Crop) {
   return p.x >= c.x && p.x <= c.x + c.w && p.y >= c.y && p.y <= c.y + c.h
-}
-
-function ScissorsIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <line x1="20" y1="4" x2="8.12" y2="15.88" />
-      <line x1="14.47" y1="14.48" x2="20" y2="20" />
-      <line x1="8.12" y1="8.12" x2="12" y2="12" />
-    </svg>
-  )
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
-}
-
-function TrashIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </svg>
-  )
 }
 
 function download(blob: Blob, filename: string) {

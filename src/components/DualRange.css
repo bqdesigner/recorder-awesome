@@ -1,7 +1,7 @@
 .dual {
   position: relative;
-  width: min(363px, 100%);
-  height: 12px;
+  width: 100%;
+  height: 28px;
   cursor: pointer;
   touch-action: none;
 }
@@ -12,36 +12,47 @@
   pointer-events: none;
 }
 
-/* marcador de posição da animação */
-.dual-playhead {
-  position: absolute;
-  top: 50%;
-  width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  background: #ff3b30;
-  border: 2px solid var(--ink);
-  box-sizing: border-box;
-  transform: translate(-50%, -50%);
-}
-
 .dual-track,
 .dual-fill {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  height: 6px;
-  border-radius: 500px;
+  height: 10px;
+  border-radius: 999px;
 }
 
 .dual-track {
   left: 0;
   right: 0;
-  background: var(--track);
+  background: var(--surface-3);
 }
 
 .dual-fill {
-  background: var(--ink);
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  opacity: 0.9;
+}
+
+/* marcador de posição da animação: linha fina + ponto no topo */
+.dual-playhead {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background: #fff;
+  border-radius: 1px;
+  transform: translateX(-50%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.dual-playhead::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rec);
+  transform: translateX(-50%);
 }
 
 /* dois ranges sobrepostos: só os thumbs capturam o ponteiro */
@@ -58,36 +69,41 @@
   appearance: none;
 }
 
+/* alças de trim: barras verticais, mais fáceis de pegar que um círculo */
 .dual-thumb::-webkit-slider-thumb {
   pointer-events: auto;
   -webkit-appearance: none;
   appearance: none;
   width: 12px;
-  height: 12px;
-  border-radius: 6px;
+  height: 22px;
+  border-radius: 5px;
   background: #fff;
-  border: 2px solid var(--ink);
+  border: 2px solid var(--bg);
   box-sizing: border-box;
-  cursor: pointer;
+  cursor: ew-resize;
+  transition: transform 0.12s var(--ease);
+}
+.dual-thumb::-webkit-slider-thumb:hover {
+  transform: scaleY(1.1);
 }
 
 .dual-thumb::-moz-range-thumb {
   pointer-events: auto;
   width: 12px;
-  height: 12px;
-  border-radius: 6px;
+  height: 22px;
+  border-radius: 5px;
   background: #fff;
-  border: 2px solid var(--ink);
+  border: 2px solid var(--bg);
   box-sizing: border-box;
-  cursor: pointer;
+  cursor: ew-resize;
 }
 
 .dual-thumb:focus-visible::-webkit-slider-thumb {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .dual-thumb:focus-visible::-moz-range-thumb {
-  outline: 2px solid var(--ink);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

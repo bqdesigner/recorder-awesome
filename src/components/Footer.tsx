@@ -1,9 +1,9 @@
 const AUTHOR_URL = 'https://brunoqueiros.com'
 
-/** Rodapé do bloco de gravação: crédito do autor. */
+/** Rodapé da tela inicial: crédito do autor + nota de privacidade. */
 function Footer() {
   return (
-    <div className="recorder__footer">
+    <footer className="footer">
       <p>
         criado ❤️ pelo{' '}
         <a href={AUTHOR_URL} target="_blank" rel="noreferrer">
@@ -11,7 +11,7 @@ function Footer() {
         </a>
       </p>
       <p>Não coletamos seus dados :)</p>
-    </div>
+    </footer>
   )
 }
 

@@ -22,19 +22,30 @@
 }
 
 :root {
-  /* tokens do design (Recorder Awesome) */
-  --ink: #191819;
-  --surface: #f2f2f2;
-  --line: #e2e2e2;
-  --muted: #919191;
-  --muted-2: #6b6b6b;
-  --sub: #878787;
-  --placeholder: #a29fa2;
-  --track: #b3b3b3;
+  /* tokens do design (Recorder Awesome) — tema escuro de estúdio */
+  --bg: #0d0d0f;
+  --surface: #151517;
+  --surface-2: #1c1c20;
+  --surface-3: #25252b;
+  --line: #26262c;
+  --line-strong: #363640;
+  --text: #f4f4f6;
+  --text-2: #b9b9c2;
+  --muted: #7c7c88;
+  --accent: #4a9eff;
+  --accent-2: #9b5de5;
+  --rec: #ff3b30;
+  --danger: #ff5c5c;
+  --radius-lg: 16px;
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
+  color-scheme: dark;
   font-family: 'DM Sans', system-ui, sans-serif;
   font-optical-sizing: auto;
-  color: var(--ink);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -51,9 +62,17 @@ body,
 
 body {
   margin: 0;
-  background: #fff;
+  background: var(--bg);
 }
 
-button {
+button,
+input,
+select {
   font-family: inherit;
+  font-size: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
