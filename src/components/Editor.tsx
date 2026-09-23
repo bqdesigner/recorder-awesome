@@ -71,6 +71,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const [crop, setCrop] = useState<Crop | null>(null)
   const [cropMode, setCropMode] = useState(false)
   const [frameId, setFrameId] = useState('none')
+  const [radius, setRadius] = useState(0)
   const [addRespiro, setAddRespiro] = useState(false)
   const [background, setBackground] = useState('#1e1e1e')
   const [bgTransparent, setBgTransparent] = useState(false)
@@ -99,7 +100,9 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   const busy = exportState.kind === 'download'
 
   const frame = frameId === 'none' ? null : FRAMES.find((f) => f.id === frameId) ?? null
+  const radiusEnabled = !frame || !!frame.customRadius
   const scene: Scene = {
+    radius,
     frame,
     // sem respiro o fundo é transparente (vãos de devices/cantos não se misturam
     // com a moldura escura); no export MP4 vira branco, pois MP4 não tem alpha.
@@ -172,7 +175,7 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
   // redesenha ao mudar recorte / moldura / background / encaixe
   useEffect(() => {
     drawRef.current()
-  }, [crop, cropMode, frameId, addRespiro, background, bgTransparent, screenFill, fit])
+  }, [crop, cropMode, frameId, radius, addRespiro, background, bgTransparent, screenFill, fit])
 
   useEffect(() => {
     trimRef.current = { start: trimStart, end: trimEnd }
@@ -571,6 +574,24 @@ function Editor({ blob, duration: estDuration, previewUrl, onReset }: Props) {
                     </button>
                   ))}
                 </div>
+              </Field>
+
+              <Field
+                label="Radius"
+                hint={radiusEnabled ? `${radius}px` : 'Indisponível para esta moldura'}
+                disabled={!radiusEnabled}
+              >
+                <input
+                  type="range"
+                  className="range"
+                  aria-label="Radius"
+                  min={0}
+                  max={80}
+                  step={1}
+                  value={radius}
+                  disabled={!radiusEnabled}
+                  onChange={(e) => setRadius(Number(e.target.value))}
+                />
               </Field>
 
               <Field label="Encaixe" hint="Como o vídeo ocupa a tela da moldura">

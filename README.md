@@ -18,7 +18,36 @@ Alternativa ao gifcap.dev com personalização (mockups) e saída em MP4.
 
 Plano completo: [`docs/plan.md`](docs/plan.md).
 
-> Status: em planejamento. Suporte só Chrome/Edge.
+> Status: em uso, com deploy na Vercel. Suporte só Chrome/Edge.
+
+## Recursos
+
+### Grava
+- Captura de tela, janela ou aba, sem áudio.
+- Indicador ao vivo e cronômetro durante a gravação.
+
+### Edita
+- **Trim** direto na timeline: alças de início e fim.
+- **Playhead** acompanha o playback; clicar ou arrastar na timeline faz seek contínuo.
+- **Recorte (crop)** de uma região da tela, com cantos ajustáveis.
+
+### Formata
+- **Moldura:** Nenhuma, Borda preta, Borda branca, Celular ou Notebook.
+- **Radius:** controle deslizante (0–80px) que arredonda os cantos da gravação.
+  Vale para Nenhuma e para as bordas; fica desabilitado em Celular e Notebook,
+  que têm raio próprio. O valor é em px na resolução original da gravação.
+- **Encaixe:** Fit (mostra o vídeo inteiro) ou Fill (preenche a tela da moldura, pode cortar).
+- **Cor da tela:** cor das sobras do Fit dentro da moldura.
+- **Respiro:** margem em volta da gravação, com cor de fundo ou transparente.
+  Sem respiro, o fundo fica transparente (no MP4, que não tem alpha, vira branco).
+
+### Exporta
+- **GIF** ou **MP4** (H.264, 30 fps fixos, até 1920px no maior lado).
+- **Velocidade:** 0.5×, 1×, 1.5× ou 2×.
+- **Quadros por segundo** (só GIF): 10, 15, 20 ou 24.
+- **Resolução:** Auto (reduz o GIF com downscale em etapas + nitidez, respeita o teto do formato), 100% ou 50%.
+- Estimativa de dimensões, quadros e peso antes de baixar.
+- Nome padrão do arquivo: `RecordingAwesome-AAAA-MM-DD_HH-MM-SS.<ext>`.
 
 ## Privacidade / LGPD
 

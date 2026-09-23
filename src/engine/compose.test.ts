@@ -16,6 +16,20 @@ describe('composedSize', () => {
     expect(layout.screen).toEqual({ x: 0, y: 0, w: 640, h: 480, radius: 0 })
   })
 
+  it('sem moldura aplica o radius da cena na tela', () => {
+    const { layout } = composedSize({ ...base, frame: null, radius: 24 }, 640, 480)
+    expect(layout.screen.radius).toBe(24)
+  })
+
+  it('radius vale para bordas e é ignorado em celular/notebook', () => {
+    const size = (id: string) =>
+      composedSize({ ...base, frame: FRAMES.find((f) => f.id === id)!, radius: 30 }, 640, 480)
+    expect(size('border-black').layout.screen.radius).toBe(30)
+    expect(size('border-white').layout.screen.radius).toBe(30)
+    expect(size('phone').layout.screen.radius).toBe(40)
+    expect(size('laptop').layout.screen.radius).toBe(6)
+  })
+
   it('padding soma 2x em cada eixo', () => {
     const { width, height } = composedSize({ ...base, frame: null, padding: 20 }, 640, 480)
     expect(width).toBe(680)
