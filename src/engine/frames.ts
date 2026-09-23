@@ -5,11 +5,11 @@ import type { Frame, FrameLayout } from './compose'
 /** Borda simples: device = vídeo + espessura uniforme. */
 function border(id: string, label: string, color: string): Frame {
   const t = 12
-  const radius = 16
   return {
     id,
     label,
-    layout(sw, sh) {
+    customRadius: true,
+    layout(sw, sh, radius = 16) {
       return {
         width: sw + 2 * t,
         height: sh + 2 * t,
@@ -19,7 +19,8 @@ function border(id: string, label: string, color: string): Frame {
     drawBody(ctx, l) {
       ctx.fillStyle = color
       ctx.beginPath()
-      ctx.roundRect(0, 0, l.width, l.height, radius + t)
+      // canto externo concêntrico ao da tela; com raio 0 a borda fica reta
+      ctx.roundRect(0, 0, l.width, l.height, l.screen.radius > 0 ? l.screen.radius + t : 0)
       ctx.fill()
     },
   }

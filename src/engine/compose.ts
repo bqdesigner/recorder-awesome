@@ -21,8 +21,10 @@ export interface FrameLayout {
 export interface Frame {
   id: string
   label: string
+  /** Aceita raio de canto customizado (ver `Scene.radius`). */
+  customRadius?: boolean
   /** Layout calculado a partir da resolução da fonte. */
-  layout(srcW: number, srcH: number): FrameLayout
+  layout(srcW: number, srcH: number, radius?: number): FrameLayout
   /** Desenha o corpo do dispositivo (atrás da tela). */
   drawBody(ctx: CanvasRenderingContext2D, layout: FrameLayout): void
 }
@@ -35,6 +37,8 @@ export interface Scene {
   padding: number
   /** cor da tela atrás do vídeo (aparece no letterbox do fit). Default #000. */
   screenFill?: string
+  /** raio do canto da tela (px na escala da fonte). Só vale sem moldura ou em moldura com `customRadius`. */
+  radius?: number
 }
 
 /** Região da fonte a usar (crop em px, ou frame inteiro). */
@@ -46,8 +50,10 @@ export interface SrcRect {
 }
 
 function baseLayout(scene: Scene, srcW: number, srcH: number): FrameLayout {
-  if (scene.frame) return scene.frame.layout(srcW, srcH)
-  return { width: srcW, height: srcH, screen: { x: 0, y: 0, w: srcW, h: srcH, radius: 0 } }
+  if (scene.frame) {
+    return scene.frame.layout(srcW, srcH, scene.frame.customRadius ? scene.radius : undefined)
+  }
+  return { width: srcW, height: srcH, screen: { x: 0, y: 0, w: srcW, h: srcH, radius: scene.radius ?? 0 } }
 }
 
 /** Tamanho final da composição (com padding). */
